@@ -12,6 +12,13 @@ pub fn buildhash() -> &'static str {
     option_env!("BUILDHASH").unwrap_or("dev").trim()
 }
 
+/// Marker string identifying this build as the GMAT Focus Edition fork.
+/// Produced in the Rust core and surfaced through the rsbridge/PyO3 boundary
+/// into the Qt "About" dialog, demonstrating the Rust -> Python -> UI pipeline.
+pub fn gmat_marker() -> &'static str {
+    "GMAT Focus Edition (desktop)"
+}
+
 pub(crate) fn sync_client_version() -> &'static str {
     static VER: LazyLock<String> = LazyLock::new(|| {
         format!(
