@@ -20,6 +20,7 @@ import anki
 import anki.sound
 import aqt
 import aqt.forms
+import aqt.gmat_dashboard
 import aqt.progress
 import aqt.sound
 from anki import hooks
@@ -248,6 +249,7 @@ class AnkiQt(QMainWindow):
         self.toolbar.draw()
         # add-ons are only available here after setupAddons
         gui_hooks.reviewer_did_init(self.reviewer)
+        aqt.gmat_dashboard.init()  # GMAT readiness panel (track T3)
 
     def setupProfileAfterWebviewsLoaded(self) -> None:
         for w in (self.web, self.bottomWeb):
