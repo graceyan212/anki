@@ -183,8 +183,16 @@ impl QueueBuilder {
         })
     }
 
-    pub(super) fn build(mut self, learn_ahead_secs: i64) -> CardQueues {
+    pub(super) fn build(
+        mut self,
+        learn_ahead_secs: i64,
+        points_at_stake_weights: &HashMap<NoteId, f32>,
+    ) -> CardQueues {
         self.sort_new();
+        // GMAT fork (T2): points-at-stake review ordering, applied in memory
+        // after self.review is populated by gather_cards (no card.due mutation,
+        // so undo is unaffected).
+        self.sort_review(points_at_stake_weights);
 
         // intraday learning and total learn count
         let intraday_learning = sort_learning(self.learning);
@@ -287,7 +295,11 @@ impl Collection {
 
         queues.gather_cards(self)?;
 
-        let queues = queues.build(self.learn_ahead_secs() as i64);
+        // GMAT fork (T2): compute per-note points-at-stake weights (one
+        // aggregate query) so the review queue can be reordered in memory.
+        let points_at_stake_weights = self.points_at_stake_weights()?;
+
+        let queues = queues.build(self.learn_ahead_secs() as i64, &points_at_stake_weights);
 
         Ok(queues)
     }
