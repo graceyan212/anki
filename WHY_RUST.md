@@ -4,7 +4,7 @@ The GMAT fork adds two engine features — a **points-at-stake review ordering**
 and a **per-topic mastery query** — to Anki's Rust scheduler (`rslib`). Both
 deliberately live below the Python (`pylib`) layer. Here is why.
 
-## 1. The review order is produced *inside* the queue builder
+## 1. The review order is produced _inside_ the queue builder
 
 The order a study session shows cards in is decided in
 `rslib/src/scheduler/queue/builder`, not in Python. Review cards are gathered
@@ -62,4 +62,4 @@ generated bindings, with no per-platform reimplementation. The Python binding
 
 In short: the data lives in Rust/SQLite, the ordering decision is made in Rust,
 the performance budget demands Rust, and the safety guarantees are Rust's to
-keep. Python is the right place to *call* this feature, not to *implement* it.
+keep. Python is the right place to _call_ this feature, not to _implement_ it.

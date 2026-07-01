@@ -20,10 +20,10 @@ impl QueueBuilder {
     /// configured `review_order`). Here we stably reorder the already-gathered
     /// `self.review` list in memory by a precomputed per-note weight
     /// (topic_weight × student-weakness; see
-    /// `scheduler::topic_mastery::points_at_stake_weights`): the highest-weighted
-    /// cards float to the front — `topic_weight` is uniform (1.0) by default, so
-    /// in practice this orders the student's weakest topics first. This is purely
-    /// in-memory — no `card.due` is
+    /// `scheduler::topic_mastery::points_at_stake_weights`): the
+    /// highest-weighted cards float to the front — `topic_weight` is
+    /// uniform (1.0) by default, so in practice this orders the student's
+    /// weakest topics first. This is purely in-memory — no `card.due` is
     /// mutated, so there is nothing for the undo system to track.
     ///
     /// `weights` is empty when the feature has no data (e.g. untagged
