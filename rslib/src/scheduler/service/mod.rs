@@ -3,11 +3,6 @@
 
 mod answering;
 mod states;
-// GMAT fork (T2): the topic-mastery Collection method lives at
-// scheduler/topic_mastery.rs; declared here (via #[path]) because
-// scheduler/mod.rs is owned by another track and must not be edited.
-#[path = "../topic_mastery.rs"]
-mod topic_mastery;
 
 use anki_proto::cards;
 use anki_proto::generic;

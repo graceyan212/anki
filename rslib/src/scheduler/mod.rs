@@ -18,6 +18,7 @@ mod service;
 pub mod states;
 pub mod timespan;
 pub mod timing;
+mod topic_mastery;
 mod upgrade;
 
 use chrono::FixedOffset;
