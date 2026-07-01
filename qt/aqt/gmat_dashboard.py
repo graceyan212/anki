@@ -19,6 +19,13 @@ Two visual states:
 The panel registers itself on ``gui_hooks.main_window_did_init`` (so importing
 this module is the only wiring needed) and adds a single "GMAT Readiness" entry
 to the Tools menu.
+
+Presentation is the "Bauhaus" language shared with the iOS app: Futura, warm
+paper, the primary palette, hard edges, and square coverage markers. The body
+is Qt rich text (QTextBrowser), which supports only a subset of HTML/CSS
+(tables + basic inline styles; no flexbox/grid/border-radius), so the layout is
+built from ``<table>`` elements and coloured cells use both the ``bgcolor``
+attribute and ``background-color`` for reliable fills.
 """
 
 from __future__ import annotations
@@ -33,6 +40,7 @@ from aqt.qt import (
     QDialog,
     QDialogButtonBox,
     QFont,
+    QFrame,
     QLabel,
     Qt,
     QTextBrowser,
@@ -47,6 +55,19 @@ if TYPE_CHECKING:
 # The deck the readiness summary scopes to. None => whole collection.
 GMAT_DECK_NAME = "GMAT Focus"
 
+# --- Shared Bauhaus tokens (must match the iOS app + approved dashboard mockup) ---
+BAUHAUS_RED = "#E2231A"
+BAUHAUS_YELLOW = "#F2C200"
+BAUHAUS_GREEN = "#2E9E4F"
+BAUHAUS_BLUE = "#1E52A8"
+BAUHAUS_INK = "#1A1A1A"
+BAUHAUS_PAPER = "#F5F1E6"
+BAUHAUS_MUTED = "#8a8577"
+# a hollow-square border colour lifted from the mockup (.topic.no .m)
+BAUHAUS_HOLLOW = "#c9c3b2"
+# Qt QFont uses the "Futura" family directly.
+BAUHAUS_FONT_FAMILY = "Futura"
+
 
 class GmatReadinessDialog(QDialog):
     def __init__(self, mw: AnkiQt) -> None:
@@ -56,12 +77,65 @@ class GmatReadinessDialog(QDialog):
         self.setMinimumWidth(560)
         disable_help_button(self)
 
+        # Dialog-level Bauhaus QSS: paper background, ink text, Futura, flat.
+        self.setFont(QFont(BAUHAUS_FONT_FAMILY))
+        self.setStyleSheet(
+            f"""
+            QDialog {{
+                background-color: {BAUHAUS_PAPER};
+                color: {BAUHAUS_INK};
+            }}
+            QLabel {{
+                color: {BAUHAUS_INK};
+                font-family: {BAUHAUS_FONT_FAMILY};
+                background-color: transparent;
+            }}
+            QTextBrowser {{
+                background-color: {BAUHAUS_PAPER};
+                color: {BAUHAUS_INK};
+                border: none;
+                font-family: {BAUHAUS_FONT_FAMILY};
+            }}
+            QPushButton {{
+                background-color: {BAUHAUS_INK};
+                color: #ffffff;
+                font-family: {BAUHAUS_FONT_FAMILY};
+                font-weight: bold;
+                padding: 8px 22px;
+                border: none;
+            }}
+            QPushButton:hover {{
+                background-color: {BAUHAUS_BLUE};
+            }}
+            """
+        )
+
         layout = QVBoxLayout(self)
+
+        # In-pane Bauhaus brand header: geometric mark + wordmark + 3px ink rule,
+        # matching the approved mockup (and the iOS app header).
+        self._brand = QLabel(self)
+        self._brand.setText(
+            f"<span style='color:{BAUHAUS_RED};'>&#9679;</span>"
+            f"<span style='color:{BAUHAUS_BLUE};'>&nbsp;&#9632;</span>"
+            f"<span style='color:{BAUHAUS_YELLOW};'>&nbsp;&#9650;</span>"
+            f"<span style='color:{BAUHAUS_INK}; font-weight:bold;'>"
+            f"&nbsp;&nbsp;GMAT READINESS</span>"
+        )
+        brand_font = QFont(BAUHAUS_FONT_FAMILY)
+        brand_font.setPointSize(14)
+        self._brand.setFont(brand_font)
+        layout.addWidget(self._brand)
+
+        rule = QFrame(self)
+        rule.setFixedHeight(3)
+        rule.setStyleSheet(f"background-color: {BAUHAUS_INK}; border: none;")
+        layout.addWidget(rule)
 
         # Headline: either the score+range or the abstain marker.
         self._headline = QLabel(self)
-        headline_font = QFont()
-        headline_font.setPointSize(20)
+        headline_font = QFont(BAUHAUS_FONT_FAMILY)
+        headline_font.setPointSize(30)
         headline_font.setBold(True)
         self._headline.setFont(headline_font)
         self._headline.setTextInteractionFlags(
@@ -72,7 +146,11 @@ class GmatReadinessDialog(QDialog):
 
         # Sub-headline: the one-line interpretation.
         self._subhead = QLabel(self)
+        subhead_font = QFont(BAUHAUS_FONT_FAMILY)
+        subhead_font.setPointSize(11)
+        self._subhead.setFont(subhead_font)
         self._subhead.setWordWrap(True)
+        self._subhead.setStyleSheet(f"color: {BAUHAUS_MUTED};")
         layout.addWidget(self._subhead)
 
         # Body: coverage, evidence, give-up rule, missing list.
@@ -108,82 +186,241 @@ class GmatReadinessDialog(QDialog):
 
     def _render(self, result: ReadinessResult, deck_name: str | None) -> None:
         if result.abstained:
-            self._headline.setText("Readiness — not enough data yet")
-            self._headline.setStyleSheet("color: #b58900;")  # amber: deliberate
+            # ABSTAIN: yellow caution accent (replaces the old amber #b58900).
+            self._headline.setText("NOT ENOUGH DATA YET")
+            self._headline.setStyleSheet(
+                f"color: {BAUHAUS_INK};"
+                f" background-color: {BAUHAUS_YELLOW};"
+                " padding: 6px 12px;"
+            )
             self._subhead.setText(
-                "Not enough review history yet to show a number you can trust. "
-                "Here's what's left:"
+                "No number you can trust yet. "
+                "Here's exactly what's left before a score shows:"
             )
         else:
             assert result.score is not None
-            self._headline.setText(f"Readiness: {result.score:.0f} / 100")
-            self._headline.setStyleSheet("")
+            # SCORE: the big score /100 in ink. The "GMAT READINESS" wordmark in
+            # the brand header carries the name, so the headline is just the
+            # number itself, big and bold.
+            self._headline.setText(f"{result.score:.0f} / 100")
+            self._headline.setStyleSheet(f"color: {BAUHAUS_INK};")
             self._subhead.setText(
                 f"Likely range {result.score_low:.0f}–{result.score_high:.0f}, "
-                f"based on your recall across {result.scored_cards} exam cards."
+                f"from your recall across {result.scored_cards} exam cards."
             )
 
         self._body.setHtml(self._body_html(result, deck_name))
 
     def _body_html(self, result: ReadinessResult, deck_name: str | None) -> str:
+        """Emit the Bauhaus body as Qt rich text.
+
+        QTextBrowser renders only a subset of HTML/CSS (Qt rich text). Flexbox,
+        grid, CSS variables and border-radius are NOT supported, so the layout
+        is built entirely from ``<table>`` elements and basic inline styles:
+        the three evidence stats and the coverage-map columns are tables, the
+        square markers are fixed-size table cells with a background/border, and
+        the score bar is approximated by a two-cell coloured table row. Coloured
+        cells set both ``bgcolor`` and ``background-color`` for reliable fills.
+        """
         scope = html.escape(deck_name) if deck_name else "whole collection"
-        cov_pct = f"{result.coverage_fraction * 100:.0f}%"
         parts: list[str] = []
-        parts.append(f"<p style='margin:2px 0'><b>Deck:</b> {scope}</p>")
 
-        # Evidence block.
-        parts.append("<table cellpadding='3' style='border-collapse:collapse'>")
+        # Scope kicker (bold, uppercase label).
         parts.append(
-            f"<tr><td><b>Topic coverage</b></td>"
-            f"<td>{cov_pct} &nbsp;"
-            f"({len(result.covered_topics)} of {result.total_topics} exam topics in your deck)</td></tr>"
+            f"<p style='margin:0 0 12px 0; font-size:10px; font-weight:bold;"
+            f" color:{BAUHAUS_MUTED};'>"
+            f"DECK &nbsp;·&nbsp; {scope.upper()}</p>"
         )
-        parts.append(
-            f"<tr><td><b>Reviews done</b></td><td>{result.graded_reviews}</td></tr>"
-        )
-        parts.append(
-            f"<tr><td><b>Cards with enough data to score</b></td>"
-            f"<td>{result.scored_cards} of {result.total_exam_cards}</td></tr>"
-        )
-        parts.append("</table>")
 
-        if result.abstained:
-            parts.append(
-                "<p style='margin:8px 0 2px 0'><b>What's left before a score shows:</b></p>"
+        if not result.abstained:
+            parts.append(self._score_bar_html(result))
+
+        # Evidence stats: three big tabular numbers with uppercase labels under
+        # them, laid out as a bordered table (ink hairlines between cells).
+        parts.append(self._stats_html(result))
+
+        # ABSTAIN: "what's left" checklist with red square markers.
+        if result.abstained and result.missing:
+            parts.append(self._whats_left_html(result))
+
+        # Coverage map: every exam topic, marked covered/not, always shown.
+        parts.append(self._coverage_html(result))
+
+        # Give-up rule: a left-accented note, italic + muted.
+        parts.append(self._rule_note_html(result))
+
+        return "".join(parts)
+
+    def _score_bar_html(self, result: ReadinessResult) -> str:
+        """Approximate the score bar with a two-cell coloured table row.
+
+        A blue-filled portion (0 -> score) against a paper remainder, both
+        boxed by an ink border. Reduced fidelity vs the mockup's positioned
+        band/tick, which Qt rich text cannot render; the exact range is stated
+        in bold below the bar so the number is never lost.
+        """
+        assert result.score is not None
+        fill = max(0, min(100, int(round(result.score))))
+        rest = 100 - fill
+        # Guard against zero-width cells (Qt may drop them).
+        fill = max(fill, 1)
+        rest = max(rest, 1)
+        return (
+            f"<p style='margin:0 0 4px 0; font-size:13px; color:{BAUHAUS_INK};'>"
+            f"Likely range "
+            f"<b>{result.score_low:.0f}&#8211;{result.score_high:.0f}</b>"
+            f" &nbsp;out of 100</p>"
+            f"<table cellspacing='0' cellpadding='0' width='100%'"
+            f" style='border-collapse:collapse; border:2px solid {BAUHAUS_INK};"
+            f" margin:0 0 4px 0;'>"
+            f"<tr>"
+            f"<td width='{fill}%' height='18' bgcolor='{BAUHAUS_BLUE}'"
+            f" style='background-color:{BAUHAUS_BLUE};'>&nbsp;</td>"
+            f"<td width='{rest}%' height='18' bgcolor='{BAUHAUS_PAPER}'"
+            f" style='background-color:{BAUHAUS_PAPER};'>&nbsp;</td>"
+            f"</tr></table>"
+            f"<table cellspacing='0' cellpadding='0' width='100%'"
+            f" style='margin:0 0 4px 0;'><tr>"
+            f"<td align='left' style='font-size:9px; font-weight:bold;"
+            f" color:{BAUHAUS_MUTED};'>0</td>"
+            f"<td align='right' style='font-size:9px; font-weight:bold;"
+            f" color:{BAUHAUS_MUTED};'>100</td>"
+            f"</tr></table>"
+        )
+
+    def _stats_html(self, result: ReadinessResult) -> str:
+        cov_pct = f"{result.coverage_fraction * 100:.0f}%"
+        # In ABSTAIN, the two threshold stats are flagged red.
+        cov_flag = result.abstained and result.coverage_fraction < 0.5
+        rev_flag = result.abstained and result.graded_reviews < 200
+
+        def cell(value: str, label: str, flagged: bool) -> str:
+            vcolor = BAUHAUS_RED if flagged else BAUHAUS_INK
+            return (
+                f"<td width='33%' valign='top' bgcolor='{BAUHAUS_PAPER}'"
+                f" style='background-color:{BAUHAUS_PAPER}; padding:10px 8px;"
+                f" border:2px solid {BAUHAUS_INK};'>"
+                f"<div style='font-size:24px; font-weight:bold; color:{vcolor};'>"
+                f"{value}</div>"
+                f"<div style='font-size:9px; font-weight:bold;"
+                f" color:{BAUHAUS_MUTED};'>{label}</div>"
+                f"</td>"
             )
-            parts.append("<ul style='margin-top:2px'>")
-            for m in result.missing:
-                parts.append(f"<li>{html.escape(m)}</li>")
-            parts.append("</ul>")
 
-        # §7c coverage map: every exam topic, marked covered/not, always shown.
+        return (
+            "<table cellspacing='0' cellpadding='0' width='100%'"
+            " style='border-collapse:collapse; margin:12px 0 6px 0;'><tr>"
+            + cell(cov_pct, "TOPIC COVERAGE", cov_flag)
+            + cell(str(result.graded_reviews), "REVIEWS DONE", rev_flag)
+            + cell(
+                f"{result.scored_cards}"
+                f"<small style='font-size:13px; color:{BAUHAUS_MUTED};'>"
+                f" / {result.total_exam_cards}</small>",
+                "SCORABLE CARDS",
+                False,
+            )
+            + "</tr></table>"
+        )
+
+    def _whats_left_html(self, result: ReadinessResult) -> str:
+        rows: list[str] = []
+        for m in result.missing:
+            rows.append(
+                f"<tr>"
+                f"<td width='16' valign='middle' style='padding:3px 0;'>"
+                f"<table cellspacing='0' cellpadding='0'><tr>"
+                f"<td width='11' height='11'"
+                f" style='border:2px solid {BAUHAUS_RED};'></td>"
+                f"</tr></table></td>"
+                f"<td valign='middle'"
+                f" style='padding:3px 0 3px 8px; font-size:12px;"
+                f" color:{BAUHAUS_INK};'>{html.escape(m)}</td>"
+                f"</tr>"
+            )
+        return (
+            f"<p style='margin:14px 0 6px 0; font-size:11px; font-weight:bold;"
+            f" color:{BAUHAUS_INK};'>WHAT'S LEFT</p>"
+            f"<table cellspacing='0' cellpadding='0'>"
+            + "".join(rows)
+            + "</table>"
+        )
+
+    def _coverage_html(self, result: ReadinessResult) -> str:
+        parts: list[str] = []
+        # Ink divider above the coverage map: a 1-row full-width table (Qt rich
+        # text does not render border-top on a <p>).
         parts.append(
-            f"<p style='margin:10px 0 2px 0'><b>Exam coverage</b> — "
-            f"{len(result.covered_topics)} of {result.total_topics} topics in your deck</p>"
+            f"<table cellspacing='0' cellpadding='0' width='100%'"
+            f" style='margin:16px 0 0 0;'><tr>"
+            f"<td height='2' bgcolor='{BAUHAUS_INK}'"
+            f" style='background-color:{BAUHAUS_INK};'></td></tr></table>"
+        )
+        parts.append(
+            f"<p style='margin:10px 0 2px 0; font-size:11px;"
+            f" font-weight:bold; color:{BAUHAUS_INK};'>"
+            f"EXAM COVERAGE &#8212; {len(result.covered_topics)} / "
+            f"{result.total_topics} TOPICS</p>"
         )
         for section_name, rows in result.coverage_map():
             parts.append(
-                f"<p style='margin:6px 0 1px 0'><b>{html.escape(section_name)}</b></p>"
+                f"<p style='margin:12px 0 4px 0; font-size:12px;"
+                f" font-weight:bold; color:{BAUHAUS_INK};'>"
+                f"{html.escape(section_name).upper()}</p>"
             )
-            parts.append("<div style='margin-left:8px'>")
-            for topic_name, is_covered in rows:
-                label = html.escape(topic_name)
-                if is_covered:
-                    parts.append(
-                        f"<div><span style='color:#2e7d32'>&#10003;</span> {label}</div>"
-                    )
-                else:
-                    parts.append(
-                        f"<div><span style='color:#c0392b'>&#10007;</span> "
-                        f"<span style='color:#999'>{label}</span></div>"
-                    )
-            parts.append("</div>")
-
-        # The rule, verbatim.
-        parts.append(
-            f"<p style='margin-top:10px;color:#888'><i>{html.escape(result.rule_text)}</i></p>"
-        )
+            # Two-column topic grid via a table (grid/flex unsupported here).
+            cells = [self._topic_cell(name, cov) for name, cov in rows]
+            parts.append(
+                "<table cellspacing='0' cellpadding='0' width='100%'"
+                " style='border-collapse:collapse;'>"
+            )
+            for i in range(0, len(cells), 2):
+                left = cells[i]
+                right = cells[i + 1] if i + 1 < len(cells) else "<td width='50%'></td>"
+                parts.append(f"<tr>{left}{right}</tr>")
+            parts.append("</table>")
         return "".join(parts)
+
+    def _topic_cell(self, topic_name: str, is_covered: bool) -> str:
+        label = html.escape(topic_name)
+        if is_covered:
+            # Green filled square marker; ink label.
+            marker = (
+                f"<td width='13' height='13' bgcolor='{BAUHAUS_GREEN}'"
+                f" style='background-color:{BAUHAUS_GREEN};"
+                f" border:2px solid {BAUHAUS_GREEN};'></td>"
+            )
+            label_color = BAUHAUS_INK
+        else:
+            # Hollow square with a muted border; muted label.
+            marker = (
+                f"<td width='13' height='13' bgcolor='{BAUHAUS_PAPER}'"
+                f" style='background-color:{BAUHAUS_PAPER};"
+                f" border:2px solid {BAUHAUS_HOLLOW};'></td>"
+            )
+            label_color = BAUHAUS_MUTED
+        return (
+            f"<td width='50%' valign='middle' style='padding:3px 0;'>"
+            f"<table cellspacing='0' cellpadding='0'><tr>"
+            f"{marker}"
+            f"<td valign='middle'"
+            f" style='padding-left:8px; font-size:12px; color:{label_color};'>"
+            f"{label}</td>"
+            f"</tr></table></td>"
+        )
+
+    def _rule_note_html(self, result: ReadinessResult) -> str:
+        # Left-ruled note: a narrow yellow accent cell + italic muted text.
+        return (
+            f"<table cellspacing='0' cellpadding='0' width='100%'"
+            f" style='border-collapse:collapse; margin-top:16px;'><tr>"
+            f"<td width='4' bgcolor='{BAUHAUS_YELLOW}'"
+            f" style='background-color:{BAUHAUS_YELLOW};'></td>"
+            f"<td bgcolor='{BAUHAUS_PAPER}'"
+            f" style='padding:9px 12px; font-size:12px;"
+            f" color:{BAUHAUS_MUTED}; background-color:{BAUHAUS_PAPER};'>"
+            f"<i>{html.escape(result.rule_text)}</i></td>"
+            f"</tr></table>"
+        )
 
 
 def show_gmat_readiness(mw: AnkiQt) -> None:
