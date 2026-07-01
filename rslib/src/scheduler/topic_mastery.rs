@@ -15,11 +15,12 @@
 //! of configurable depth and report, per group: total cards, how many are
 //! "mastered", the mastery fraction, and the average recall from the revlog.
 //!
-//! This is read-only and runs inside `transact_no_undo` (like Anki's other
-//! stats aggregates), so it records no new undo step. The heavy lifting is a
-//! single aggregate SQL query (`storage::topic_stats`); here we only parse tags
-//! and fold the rows. The points-at-stake reorder it also powers mutates no
-//! cards, so that path leaves the undo history untouched.
+//! This is read-only: it does a single plain storage read, so it records no new
+//! undo step and leaves the existing undo history intact (a stats query must not
+//! cost the student their pending undo). The heavy lifting is a single aggregate
+//! SQL query (`storage::topic_stats`); here we only parse tags and fold the rows.
+//! The points-at-stake reorder it also powers mutates no cards, so that path
+//! leaves the undo history untouched too.
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -74,9 +75,11 @@ impl Collection {
             req.mastered_retrievability
         };
 
-        // Read-only: wrap in a no-undo transaction so we never push to the undo
-        // queue (mirrors how other read aggregates avoid touching undo state).
-        let rows = self.transact_no_undo(|col| col.storage.all_topic_card_rows())?;
+        // Read-only: a plain storage read. It records no undo step AND leaves the
+        // existing undo history intact, so opening the readiness dashboard never
+        // costs the student their pending undo (same pattern as
+        // points_at_stake_weights below).
+        let rows = self.storage.all_topic_card_rows()?;
 
         let mut groups: BTreeMap<String, Accumulator> = BTreeMap::new();
         for row in &rows {
@@ -135,8 +138,9 @@ impl Collection {
     pub(crate) fn points_at_stake_weights(&mut self) -> Result<HashMap<NoteId, f32>> {
         // Plain read: this runs while a queue is being built (possibly inside an
         // outer transaction), so we must not open/commit our own transaction or
-        // clear study queues. The standalone RPC below uses transact_no_undo;
-        // here a direct storage read is correct and side-effect-free.
+        // clear study queues. (The standalone mastery RPC above does a plain read
+        // for the same reason — a direct storage read is correct and
+        // side-effect-free.)
         let rows = self.storage.all_topic_card_rows()?;
 
         // First pass: per-topic weakness, grouped at the contract depth.
@@ -544,15 +548,10 @@ mod test {
             "undo restored the pre-op interval after the reorder"
         );
 
-        // The read-only mastery query uses transact_no_undo (like every other
-        // Anki stats aggregate, e.g. card_stats); per Anki's semantics that
-        // resets the undo history, but it must run cleanly and leave the
-        // collection in a consistent, still-undoable state for fresh ops.
-        let _ = col
-            .get_topic_mastery_stats(GetTopicMasteryStatsRequest::default())
-            .unwrap();
-        assert_eq!(col.can_undo(), None, "transact_no_undo clears history");
-        // A subsequent op is recorded and undoable -> undo machinery intact.
+        // The read-only mastery query is a plain storage read, so it must NOT
+        // clear the undo history: opening the readiness dashboard should never
+        // cost the student their pending undo. Establish a fresh undoable op, run
+        // the query, and confirm the op still stands and remains replayable.
         col.transact(Op::UpdateCard, |col| {
             col.get_and_update_card(card.id, |c| {
                 c.interval = 99;
@@ -563,6 +562,14 @@ mod test {
         })
         .unwrap();
         assert_eq!(col.can_undo(), Some(&Op::UpdateCard));
+        let _ = col
+            .get_topic_mastery_stats(GetTopicMasteryStatsRequest::default())
+            .unwrap();
+        assert_eq!(
+            col.can_undo(),
+            Some(&Op::UpdateCard),
+            "the mastery query (plain read) must not clear the undo history"
+        );
         col.undo().unwrap();
         assert_eq!(col.storage.get_card(card.id).unwrap().unwrap().interval, 10);
     }
