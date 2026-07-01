@@ -120,8 +120,10 @@ impl Collection {
     /// reorder (see `queue::builder::sorting::sort_review`).
     ///
     /// weight = topic_weight × weakness, where:
-    ///   * `topic_weight` is how much the topic is worth on the exam (tunable
-    ///     table below; defaults to 1.0 for unlisted topics), and
+    ///   * `topic_weight` is a tunable per-topic multiplier, UNIFORM (1.0) by
+    ///     default — GMAT Focus weights its sections equally and there is no
+    ///     defensible per-topic frequency source, so this currently reduces the
+    ///     ordering to weakness alone ("weakest topics first"); and
     ///   * `weakness` ∈ [0,1] is how much the student is *not* yet on top of
     ///     the topic, derived from the topic's mastery and recall.
     ///
@@ -171,26 +173,16 @@ impl Collection {
     }
 }
 
-/// How "at stake" a topic is, independent of the student: a rough proxy for its
-/// share of the GMAT Focus exam. TUNABLE — edit these numbers (or load them
-/// from config) to change which topics surface first. Unlisted topics use 1.0.
-fn topic_weight(topic: &str) -> f32 {
-    // Section-level defaults; Data Insights and Quant carry the heaviest scoring
-    // weight on GMAT Focus. Verbal and any unlisted section default to 1.0.
-    let section_default = if topic.starts_with("DataInsights") {
-        1.2
-    } else if topic.starts_with("Quant") {
-        1.1
-    } else {
-        1.0
-    };
-    // A couple of high-yield topics nudged above their section default.
-    match topic {
-        "DataInsights::DataSufficiency" => 1.4,
-        "Quant::Arithmetic::Percents" => 1.3,
-        "Verbal::CriticalReasoning::Assumption" => 1.2,
-        _ => section_default,
-    }
+/// How "at stake" a topic is, independent of the student. This is a TUNABLE
+/// hook for weighting topics by their share of the exam — but GMAT Focus scores
+/// its three sections EQUALLY (per GMAC), and there is no published per-topic
+/// question-frequency distribution we can defensibly cite, so every topic gets a
+/// uniform 1.0. With uniform weights, `weight = topic_weight × weakness` reduces
+/// to ordering by student weakness alone ("weakest topics first"). If a
+/// defensible per-topic distribution ever exists, replace the body (or load it
+/// from config) — but do NOT reintroduce guessed multipliers.
+fn topic_weight(_topic: &str) -> f32 {
+    1.0
 }
 
 /// Student weakness for a topic ∈ [0,1]: 1.0 = totally unstudied/failing,
@@ -487,19 +479,21 @@ mod test {
     }
 
     #[test]
-    fn points_at_stake_weights_rank_weak_high_value_topics_first() {
+    fn points_at_stake_weights_rank_weaker_topics_first() {
         let mut col = Collection::new();
         // Strong topic: fully mastered -> low weakness -> low weight.
         let strong = add_review_card(&mut col, &["Quant::Algebra::LinearEquations"], 60);
-        // Weak, high-value topic: young card on a heavily-weighted topic.
+        // Weak topic: young, unmastered card.
         let weak = add_review_card(&mut col, &["DataInsights::DataSufficiency"], 1);
 
+        // topic_weight is uniform (1.0), so weight == weakness: the weaker topic
+        // must rank first on the grounded weakness signal alone.
         let weights = col.points_at_stake_weights().unwrap();
         let strong_w = weights[&strong];
         let weak_w = weights[&weak];
         assert!(
             weak_w > strong_w,
-            "weak high-value topic should outrank mastered topic: weak={weak_w} strong={strong_w}"
+            "weaker topic should outrank the mastered one: weak={weak_w} strong={strong_w}"
         );
     }
 }
