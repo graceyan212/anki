@@ -8,7 +8,7 @@ Loads content/gmat_focus.apkg into a throwaway collection and exercises BOTH
 states the dashboard can show, printing what the panel would display:
 
   (a) fresh import (0 reviews)          -> ABSTAIN + "what's missing"
-  (b) enough graded reviews + coverage  -> SCORE + honest range + coverage %
+  (b) enough graded reviews + coverage  -> SCORE + likely range + coverage %
   (c) a narrow subdeck                  -> ABSTAIN on the coverage branch
 
 The GUI (aqt.gmat_dashboard) is a thin wrapper over the same
@@ -90,7 +90,7 @@ def main() -> None:
     assert res_a.abstained, "fresh import should abstain"
     assert res_a.score is None
     assert res_a.graded_reviews == 0
-    assert any("graded review" in m for m in res_a.missing)
+    assert any("reviews to go" in m for m in res_a.missing)
     print("\n[OK] abstained on fresh import; 0 reviews; lists missing reviews.")
 
     # ---- STATE (b): enough reviews + coverage -> SCORE + range ----------
@@ -130,7 +130,7 @@ def main() -> None:
     print("\n".join(res_c.summary_lines()))
     assert res_c.abstained
     assert res_c.coverage_fraction < 0.50
-    assert any("coverage" in m for m in res_c.missing)
+    assert any("exam topic" in m for m in res_c.missing)
     print("\n[OK] coverage branch of the give-up rule abstains as expected.")
 
     col.close()

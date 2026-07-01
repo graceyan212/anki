@@ -108,21 +108,19 @@ class GmatReadinessDialog(QDialog):
 
     def _render(self, result: ReadinessResult, deck_name: str | None) -> None:
         if result.abstained:
-            self._headline.setText("Readiness: —  (abstaining)")
+            self._headline.setText("Readiness — not enough data yet")
             self._headline.setStyleSheet("color: #b58900;")  # amber: deliberate
             self._subhead.setText(
-                "Not enough data to give an honest score yet. "
-                "Here's exactly what's missing:"
+                "Not enough review history yet to show a number you can trust. "
+                "Here's what's left:"
             )
         else:
             assert result.score is not None
             self._headline.setText(f"Readiness: {result.score:.0f} / 100")
             self._headline.setStyleSheet("")
             self._subhead.setText(
-                f"Honest range {result.score_low:.0f}–{result.score_high:.0f} "
-                f"(wide on purpose — difficulty tags are coarse, not IRT-calibrated). "
-                f"Point estimate = mean FSRS recall probability across "
-                f"{result.scored_cards} exam cards."
+                f"Likely range {result.score_low:.0f}–{result.score_high:.0f}, "
+                f"based on your recall across {result.scored_cards} exam cards."
             )
 
         self._body.setHtml(self._body_html(result, deck_name))
@@ -131,45 +129,55 @@ class GmatReadinessDialog(QDialog):
         scope = html.escape(deck_name) if deck_name else "whole collection"
         cov_pct = f"{result.coverage_fraction * 100:.0f}%"
         parts: list[str] = []
-        parts.append(f"<p style='margin:2px 0'><b>Scope:</b> {scope}</p>")
+        parts.append(f"<p style='margin:2px 0'><b>Deck:</b> {scope}</p>")
 
         # Evidence block.
         parts.append("<table cellpadding='3' style='border-collapse:collapse'>")
         parts.append(
             f"<tr><td><b>Topic coverage</b></td>"
             f"<td>{cov_pct} &nbsp;"
-            f"({len(result.covered_topics)}/{result.total_topics} outline topics present)</td></tr>"
+            f"({len(result.covered_topics)} of {result.total_topics} exam topics in your deck)</td></tr>"
         )
         parts.append(
-            f"<tr><td><b>Graded reviews</b></td><td>{result.graded_reviews}</td></tr>"
+            f"<tr><td><b>Reviews done</b></td><td>{result.graded_reviews}</td></tr>"
         )
         parts.append(
-            f"<tr><td><b>Exam cards scored</b></td>"
+            f"<tr><td><b>Cards with enough data to score</b></td>"
             f"<td>{result.scored_cards} of {result.total_exam_cards}</td></tr>"
         )
         parts.append("</table>")
 
         if result.abstained:
             parts.append(
-                "<p style='margin:8px 0 2px 0'><b>Missing before a score can show:</b></p>"
+                "<p style='margin:8px 0 2px 0'><b>What's left before a score shows:</b></p>"
             )
             parts.append("<ul style='margin-top:2px'>")
             for m in result.missing:
                 parts.append(f"<li>{html.escape(m)}</li>")
             parts.append("</ul>")
 
-        if result.missing_topics:
-            shown = result.missing_topics[:12]
-            extra = len(result.missing_topics) - len(shown)
+        # §7c coverage map: every exam topic, marked covered/not, always shown.
+        parts.append(
+            f"<p style='margin:10px 0 2px 0'><b>Exam coverage</b> — "
+            f"{len(result.covered_topics)} of {result.total_topics} topics in your deck</p>"
+        )
+        for section_name, rows in result.coverage_map():
             parts.append(
-                "<p style='margin:8px 0 2px 0'><b>Topics not yet in deck:</b></p>"
+                f"<p style='margin:6px 0 1px 0'><b>{html.escape(section_name)}</b></p>"
             )
-            parts.append("<ul style='margin-top:2px'>")
-            for t in shown:
-                parts.append(f"<li><code>{html.escape(t)}</code></li>")
-            if extra > 0:
-                parts.append(f"<li>… and {extra} more</li>")
-            parts.append("</ul>")
+            parts.append("<div style='margin-left:8px'>")
+            for topic_name, is_covered in rows:
+                label = html.escape(topic_name)
+                if is_covered:
+                    parts.append(
+                        f"<div><span style='color:#2e7d32'>&#10003;</span> {label}</div>"
+                    )
+                else:
+                    parts.append(
+                        f"<div><span style='color:#c0392b'>&#10007;</span> "
+                        f"<span style='color:#999'>{label}</span></div>"
+                    )
+            parts.append("</div>")
 
         # The rule, verbatim.
         parts.append(

@@ -7,7 +7,7 @@ Self-contained: builds a tiny tagged deck in-memory rather than depending on
 the content repo's gmat_focus.apkg, then exercises BOTH required states:
 
   (a) fresh deck, 0 graded reviews  -> ABSTAIN with a "what's missing" list
-  (b) enough graded reviews + >=50% coverage -> SCORE + honest range + coverage %
+  (b) enough graded reviews + >=50% coverage -> SCORE + likely range + coverage %
 
 It also unit-tests the FSRS forgetting curve, the tag/coverage matching, and the
 two branches of the give-up rule independently.
@@ -143,7 +143,7 @@ def test_fresh_deck_abstains_on_reviews():
     assert res.graded_reviews == 0
     assert res.coverage_fraction >= 0.50  # the deck itself is broad enough
     # the missing list must call out the review shortfall
-    assert any("graded review" in m for m in res.missing)
+    assert any("review" in m for m in res.missing)
     # the rule must be stated for the UI
     assert str(MIN_GRADED_REVIEWS) in res.rule_text
 
@@ -164,7 +164,7 @@ def test_narrow_deck_abstains_on_coverage():
     res = compute_readiness(col)
     assert res.abstained
     assert res.coverage_fraction < 0.50
-    assert any("coverage" in m for m in res.missing)
+    assert any("topic" in m for m in res.missing)
 
 
 def test_studied_deck_shows_score_and_wide_range():
@@ -191,5 +191,37 @@ def test_studied_deck_shows_score_and_wide_range():
     assert res.scored_cards > 0
     # summary text never shows a bare number; it always pairs score with range
     text = "\n".join(res.summary_lines())
-    assert "honest range" in text
+    assert "likely range" in text
     assert "Topic coverage" in text
+
+
+def test_coverage_map_marks_every_topic():
+    """§7c: the coverage map lists ALL 28 topics grouped by section, each marked
+    covered/not -- independent of whether any are missing, so it's always shown."""
+    col = getEmptyCol()
+    for topic in ("Quant::Arithmetic::Percents", "DataInsights::DataSufficiency"):
+        note = col.newNote()
+        note["Front"] = topic
+        note["Back"] = "a"
+        note.tags = [topic, "difficulty::easy"]
+        col.addNote(note)
+    res = compute_readiness(col)
+
+    cmap = res.coverage_map()
+    # three sections, in outline order
+    assert [name for name, _ in cmap] == [
+        "Quantitative Reasoning",
+        "Verbal Reasoning",
+        "Data Insights",
+    ]
+    # every outline topic appears exactly once across the whole map
+    all_rows = [row for _, rows in cmap for row in rows]
+    assert len(all_rows) == 28
+    covered = {name for name, is_cov in all_rows if is_cov}
+    not_covered = {name for name, is_cov in all_rows if not is_cov}
+    # the two present topics are marked covered (by their prettified labels)
+    assert "Arithmetic · Percents" in covered
+    assert "Data Sufficiency" in covered
+    # a topic absent from the deck is marked not-covered
+    assert "Two Part Analysis" in not_covered
+    assert len(covered) == 2

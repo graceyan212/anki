@@ -25,6 +25,7 @@ This module is pure-Python and importable headless; the Qt dashboard
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -110,6 +111,23 @@ def _all_outline_topics() -> list[str]:
     for section_topics in COVERAGE_OUTLINE.values():
         topics.extend(section_topics)
     return topics
+
+
+#: Human-readable section names for the coverage map.
+_SECTION_DISPLAY = {
+    "Quant": "Quantitative Reasoning",
+    "Verbal": "Verbal Reasoning",
+    "DataInsights": "Data Insights",
+}
+
+
+def _prettify_topic(tag: str) -> str:
+    """Turn an outline tag into a readable label: drop the section prefix and
+    split CamelCase subtopics. 'Quant::Arithmetic::Percents' -> 'Arithmetic ·
+    Percents'; 'DataInsights::DataSufficiency' -> 'Data Sufficiency'."""
+    parts = tag.split("::")[1:]
+    pretty = [re.sub(r"(?<!^)(?=[A-Z])", " ", p) for p in parts]
+    return " · ".join(pretty)
 
 
 # --------------------------------------------------------------------------
@@ -218,29 +236,26 @@ class ReadinessResult:
         """Plain-text rendering, used by the demo script and (escaped) the GUI."""
         lines: list[str] = []
         if self.abstained:
-            lines.append(
-                "MEMORY READINESS: -- (abstaining; not enough data to be honest)"
-            )
+            lines.append("MEMORY READINESS: — (not enough data yet)")
             lines.append("")
-            lines.append("What's missing before a score can be shown:")
+            lines.append("What's left before a score shows:")
             for m in self.missing:
                 lines.append(f"  - {m}")
         else:
             assert self.score is not None
             lines.append(
                 f"MEMORY READINESS: {self.score:.0f} / 100   "
-                f"(honest range {self.score_low:.0f}-{self.score_high:.0f})"
+                f"(likely range {self.score_low:.0f}-{self.score_high:.0f})"
             )
             lines.append(
-                f"  point estimate = mean FSRS recall probability over "
-                f"{self.scored_cards} exam cards"
+                f"  based on your recall across {self.scored_cards} exam cards"
             )
         lines.append("")
         lines.append(
             f"Topic coverage: {self.coverage_fraction * 100:.0f}%  "
-            f"({len(self.covered_topics)}/{self.total_topics} outline topics present)"
+            f"({len(self.covered_topics)} of {self.total_topics} exam topics in your deck)"
         )
-        lines.append(f"Graded reviews so far: {self.graded_reviews}")
+        lines.append(f"Reviews done: {self.graded_reviews}")
         if self.missing_topics:
             lines.append(f"Topics not yet in deck ({len(self.missing_topics)}):")
             for t in self.missing_topics:
@@ -248,6 +263,19 @@ class ReadinessResult:
         lines.append("")
         lines.append(self.rule_text)
         return lines
+
+    def coverage_map(self) -> list[tuple[str, list[tuple[str, bool]]]]:
+        """Full §7c coverage map: every exam topic, grouped by section, each
+        marked covered/not. Returns
+        [(section_name, [(topic_name, covered), ...]), ...] over ALL outline
+        topics — independent of whether any are missing, so it's always shown."""
+        covered = set(self.covered_topics)
+        out: list[tuple[str, list[tuple[str, bool]]]] = []
+        for section, topics in COVERAGE_OUTLINE.items():
+            name = _SECTION_DISPLAY.get(section, section)
+            rows = [(_prettify_topic(t), t in covered) for t in topics]
+            out.append((name, rows))
+        return out
 
 
 # --------------------------------------------------------------------------
@@ -395,11 +423,9 @@ def compute_readiness(
     coverage_fraction = len(covered) / total_topics if total_topics else 0.0
 
     rule_text = (
-        f"Give-up rule: a score is shown only when there are at least "
-        f"{min_graded_reviews} graded reviews AND topic coverage is at least "
-        f"{min_coverage_fraction * 100:.0f}%. Otherwise we abstain and list what's "
-        f"missing. (No AI; difficulty tags are coarse, so the range is wide on "
-        f"purpose.)"
+        f"You'll see a readiness score once you've done {min_graded_reviews} "
+        f"reviews and your deck covers at least {min_coverage_fraction * 100:.0f}% "
+        f"of the exam topics."
     )
 
     result = ReadinessResult(
@@ -418,22 +444,22 @@ def compute_readiness(
     missing: list[str] = []
     if graded_reviews < min_graded_reviews:
         missing.append(
-            f"{min_graded_reviews - graded_reviews} more graded reviews "
-            f"(have {graded_reviews}, need {min_graded_reviews})."
+            f"{min_graded_reviews - graded_reviews} more reviews to go "
+            f"({graded_reviews} of {min_graded_reviews} done)."
         )
     if coverage_fraction < min_coverage_fraction:
         need = int(round(min_coverage_fraction * total_topics)) - len(covered)
         missing.append(
-            f"broader coverage: {coverage_fraction * 100:.0f}% of topics now, "
-            f"need {min_coverage_fraction * 100:.0f}% "
-            f"(about {max(need, 1)} more topic(s))."
+            f"Add cards for about {max(need, 1)} more exam topic(s) — your deck "
+            f"covers {coverage_fraction * 100:.0f}% now, and we need "
+            f"{min_coverage_fraction * 100:.0f}%."
         )
     if not exam_cards and not missing:
         # Edge case: enough reviews + coverage recorded but no scorable FSRS
         # states (e.g. FSRS disabled). Be honest rather than divide by zero.
         missing.append(
-            "no FSRS memory states on the exam cards yet -- enable FSRS and "
-            "review the cards so a recall probability can be computed."
+            "None of your exam cards have FSRS data yet — turn on FSRS in Deck "
+            "Options and review some cards so recall can be estimated."
         )
 
     if missing:
