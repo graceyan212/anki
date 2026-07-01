@@ -96,9 +96,13 @@ COVERAGE_OUTLINE: dict[str, tuple[str, ...]] = {
     ),
 }
 
-#: Default FSRS-6 decay, used when a card has no explicit ``decay`` recorded.
-#: Matches fsrs::FSRS6_DEFAULT_DECAY in the Rust crate.
-_DEFAULT_DECAY = 0.1542
+#: Fallback FSRS decay, used only when a card has no explicit per-card ``decay``
+#: recorded (legacy / FSRS-5 cards). FSRS-6 cards store their own decay, which we
+#: read from ``card.decay`` and prefer; this constant is just the legacy default.
+#: Matches fsrs::FSRS5_DEFAULT_DECAY in the Rust crate and Anki's own convention
+#: (``card.decay ?? FSRS5_DEFAULT_DECAY`` at every core call site, e.g.
+#: rslib/src/stats/card.rs, browser_table.rs, storage/sqlite.rs).
+_DEFAULT_DECAY = 0.5
 
 
 def _all_outline_topics() -> list[str]:
@@ -121,8 +125,12 @@ def _recall_probability(stability: float, days_elapsed: float, decay: float) -> 
         factor = 0.9 ** (1 / -decay) - 1
         R      = (days_elapsed / stability * factor + 1) ** (-decay)
 
-    ``decay`` is the positive value stored on the card (e.g. 0.1542 for FSRS-6).
-    At ``days_elapsed == stability`` this returns the desired retention (0.9).
+    ``decay`` is the POSITIVE value stored on the card (verified empirically:
+    ``card.decay`` comes through positive, e.g. 0.5 for the FSRS-5 fallback or
+    ~0.1542 for an FSRS-6 card), and the crate applies ``-decay`` internally, so
+    the curve is decreasing. At ``days_elapsed == stability`` this returns the
+    desired retention (0.9). This is the same formula and sign convention Anki's
+    Rust scheduler uses everywhere; do not introduce a variant here.
     """
     if stability <= 0:
         return 0.0
@@ -357,7 +365,10 @@ def compute_readiness(
         if ms is None or ms.stability <= 0:
             continue
 
-        decay = card.decay if card.decay else _DEFAULT_DECAY
+        # Prefer the card's own stored (positive) decay; fall back to the FSRS-5
+        # default only when absent -- exactly Anki's `card.decay ??
+        # FSRS5_DEFAULT_DECAY` convention.
+        decay = card.decay if card.decay is not None else _DEFAULT_DECAY
         if card.last_review_time:
             days_elapsed = max(0.0, (now - card.last_review_time) / 86400.0)
         else:

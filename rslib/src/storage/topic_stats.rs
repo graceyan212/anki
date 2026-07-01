@@ -26,6 +26,10 @@ pub(crate) struct TopicCardRow {
     pub interval: u32,
     /// FSRS stability (days) from the cards.data JSON blob, if present.
     pub stability: Option<f32>,
+    /// FSRS per-card decay from the cards.data JSON blob, if present. Stored
+    /// positive (matching Anki's convention); `None` for legacy/FSRS-5 cards,
+    /// in which case callers fall back to `FSRS5_DEFAULT_DECAY`.
+    pub decay: Option<f32>,
     /// Number of passed reviews (ease >= 2) in the revlog.
     pub passed: u32,
     /// Total genuine reviews in the revlog.
@@ -44,8 +48,9 @@ impl SqliteStorage {
                     tags: row.get(1)?,
                     interval: row.get::<_, i64>(2)?.max(0) as u32,
                     stability: row.get(3)?,
-                    passed: row.get::<_, i64>(4)?.max(0) as u32,
-                    total: row.get::<_, i64>(5)?.max(0) as u32,
+                    decay: row.get(4)?,
+                    passed: row.get::<_, i64>(5)?.max(0) as u32,
+                    total: row.get::<_, i64>(6)?.max(0) as u32,
                 })
             })?
             .collect()

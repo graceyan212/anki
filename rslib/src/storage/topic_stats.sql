@@ -5,6 +5,7 @@
 --   * the note's space-separated tags string (topic is parsed in Rust),
 --   * the card's interval in days,
 --   * the FSRS stability from the cards.data JSON blob (NULL if absent),
+--   * the FSRS per-card decay from the cards.data JSON blob (NULL if absent),
 --   * the count of passed reviews and total reviews from the revlog.
 --
 -- The revlog counts are produced by a single grouped sub-select that is joined
@@ -21,6 +22,12 @@ SELECT c.nid,
     WHEN json_valid(c.data) THEN json_extract(c.data, '$.s')
     ELSE NULL
   END AS stability,
+  -- Per-card FSRS decay, stored positive (FSRS-6 cards persist their real
+  -- decay; NULL for legacy/FSRS-5 rows that use the default fallback in Rust).
+  CASE
+    WHEN json_valid(c.data) THEN json_extract(c.data, '$.decay')
+    ELSE NULL
+  END AS decay,
   coalesce(r.passed, 0) AS passed,
   coalesce(r.total, 0) AS total
 FROM cards c

@@ -27,6 +27,8 @@ use std::collections::HashMap;
 use anki_proto::scheduler::GetTopicMasteryStatsRequest;
 use anki_proto::scheduler::GetTopicMasteryStatsResponse;
 use anki_proto::scheduler::TopicMasteryStat;
+use fsrs::current_retrievability;
+use fsrs::MemoryState;
 use fsrs::FSRS5_DEFAULT_DECAY;
 
 use crate::prelude::*;
@@ -176,9 +178,9 @@ impl Collection {
 /// How "at stake" a topic is, independent of the student. This is a TUNABLE
 /// hook for weighting topics by their share of the exam — but GMAT Focus scores
 /// its three sections EQUALLY (per GMAC), and there is no published per-topic
-/// question-frequency distribution we can defensibly cite, so every topic gets a
-/// uniform 1.0. With uniform weights, `weight = topic_weight × weakness` reduces
-/// to ordering by student weakness alone ("weakest topics first"). If a
+/// question-frequency distribution we can defensibly cite, so every topic gets
+/// a uniform 1.0. With uniform weights, `weight = topic_weight × weakness`
+/// reduces to ordering by student weakness alone ("weakest topics first"). If a
 /// defensible per-topic distribution ever exists, replace the body (or load it
 /// from config) — but do NOT reintroduce guessed multipliers.
 fn topic_weight(_topic: &str) -> f32 {
@@ -216,23 +218,36 @@ fn is_mastered(row: &TopicCardRow, mastered_ivl: u32, mastered_retr: f32) -> boo
     if let Some(stability) = row.stability {
         // Project retrievability out to the mastery horizon. A card whose
         // memory is strong enough to still be recallable that far out is
-        // mastered even if its current interval is shorter.
-        retrievability(stability, mastered_ivl as f32) >= mastered_retr
+        // mastered even if its current interval is shorter. Use the card's own
+        // stored decay when present, falling back to FSRS5_DEFAULT_DECAY — the
+        // same convention Anki uses everywhere else (see stats/card.rs,
+        // stats/graphs/retrievability.rs, browser_table.rs, storage/sqlite.rs).
+        let decay = row.decay.unwrap_or(FSRS5_DEFAULT_DECAY);
+        retrievability(stability, mastered_ivl as f32, decay) >= mastered_retr
     } else {
         false
     }
 }
 
-/// FSRS forgetting curve R(t) = (1 + FACTOR * t / S)^decay, with the FSRS-5
-/// default decay. Returns the probability of recall `days` after a review for
-/// a card of the given `stability`.
-fn retrievability(stability: f32, days: f32) -> f32 {
+/// FSRS forgetting curve: the probability of recall `days` after a review for a
+/// card of the given `stability` and (positive) `decay`. Delegates to the
+/// `fsrs` crate's `current_retrievability` so this matches Anki's scheduler
+/// exactly rather than re-deriving a variant. `decay` is the value stored on
+/// the card (positive; the crate applies `-decay` internally), so
+/// `R(stability) == 0.9` and R decreases as `days` grows.
+fn retrievability(stability: f32, days: f32, decay: f32) -> f32 {
     if stability <= 0.0 {
         return 0.0;
     }
-    let decay = FSRS5_DEFAULT_DECAY;
-    let factor = 0.9f32.powf(1.0 / decay) - 1.0;
-    (1.0 + factor * days / stability).powf(decay)
+    // Difficulty is unused by the forgetting curve; only stability matters.
+    current_retrievability(
+        MemoryState {
+            stability,
+            difficulty: 0.0,
+        },
+        days,
+        decay,
+    )
 }
 
 /// Extract a topic tag prefix at the requested `::`-separated `depth` from a
@@ -305,12 +320,83 @@ mod test {
     #[test]
     fn retrievability_decreases_with_time_and_clears_threshold() {
         // Fresh, high-stability card is recallable far out.
-        let high = retrievability(1000.0, 21.0);
+        let high = retrievability(1000.0, 21.0, FSRS5_DEFAULT_DECAY);
         // Low-stability card decays below 0.9 quickly.
-        let low = retrievability(5.0, 21.0);
+        let low = retrievability(5.0, 21.0, FSRS5_DEFAULT_DECAY);
         assert!(high > 0.9, "high stability stays recallable: {high}");
         assert!(low < 0.9, "low stability drops off: {low}");
         assert!(high > low);
+    }
+
+    #[test]
+    fn retrievability_matches_fsrs_convention() {
+        // At days == stability, retrievability is exactly the 0.9 desired
+        // retention, for both the fallback and a real per-card decay.
+        for decay in [FSRS5_DEFAULT_DECAY, 0.1542_f32, 0.3_f32] {
+            let at_stability = retrievability(10.0, 10.0, decay);
+            assert!(
+                (at_stability - 0.9).abs() < 1e-4,
+                "R(stability) should be 0.9 for decay={decay}: {at_stability}"
+            );
+            // Curve must be strictly decreasing as days grow.
+            let mut prev = retrievability(10.0, 0.0, decay);
+            for days in [1.0, 5.0, 10.0, 21.0, 60.0, 200.0] {
+                let r = retrievability(10.0, days, decay);
+                assert!(
+                    r < prev,
+                    "R must decrease with days (decay={decay}, days={days}): {r} !< {prev}"
+                );
+                prev = r;
+            }
+        }
+    }
+
+    #[test]
+    fn is_mastered_uses_stored_per_card_decay_not_default() {
+        // A card whose retrievability at the horizon straddles the threshold
+        // depending on which decay is used proves the stored decay is honoured.
+        // In the far-out regime (days >> stability) the FSRS-6 decay (0.1542)
+        // forgets more slowly than the FSRS-5 default (0.5), so the same
+        // (stability, horizon) clears the bar under the stored decay but not
+        // under the fallback.
+        let stability = 7.0;
+        let horizon_days = 21;
+        let threshold = 0.8;
+
+        // Sanity: the two conventions genuinely disagree for this card.
+        let with_stored = retrievability(stability, horizon_days as f32, 0.1542);
+        let with_default = retrievability(stability, horizon_days as f32, FSRS5_DEFAULT_DECAY);
+        assert!(
+            with_stored >= threshold && with_default < threshold,
+            "test setup must straddle the threshold: stored={with_stored} default={with_default}"
+        );
+
+        // Card carrying the real FSRS-6 decay -> mastered via retrievability.
+        let stored = TopicCardRow {
+            note_id: NoteId(1),
+            tags: String::new(),
+            interval: 3,
+            stability: Some(stability),
+            decay: Some(0.1542),
+            passed: 0,
+            total: 0,
+        };
+        assert!(
+            is_mastered(&stored, horizon_days, threshold),
+            "card with stored decay must use it (not the default) and be mastered"
+        );
+
+        // Same card but with no stored decay -> falls back to the default and
+        // is NOT mastered. This is the regression the fix addresses: previously
+        // both branches hardcoded the default and ignored card.decay.
+        let no_decay = TopicCardRow {
+            decay: None,
+            ..stored
+        };
+        assert!(
+            !is_mastered(&no_decay, horizon_days, threshold),
+            "card without stored decay falls back to FSRS5_DEFAULT_DECAY"
+        );
     }
 
     #[test]
@@ -321,6 +407,7 @@ mod test {
             tags: String::new(),
             interval: 30,
             stability: None,
+            decay: None,
             passed: 0,
             total: 0,
         };
@@ -332,6 +419,7 @@ mod test {
             tags: String::new(),
             interval: 3,
             stability: Some(1000.0),
+            decay: None,
             passed: 0,
             total: 0,
         };
@@ -343,6 +431,7 @@ mod test {
             tags: String::new(),
             interval: 3,
             stability: Some(2.0),
+            decay: None,
             passed: 0,
             total: 0,
         };
