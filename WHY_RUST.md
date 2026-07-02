@@ -40,10 +40,11 @@ ever has to be shipped to Python.
 
 ## 3. Correctness, undo, and transactions are Rust concerns
 
-The mastery query runs inside `transact_no_undo`, exactly like Anki's other
-read-only aggregates (`card_stats`, `studied_today`, dbcheck): it records no new
-undo step, and afterward the undo machinery is fully functional for subsequent
-ops (proven by a unit test). The points-at-stake reorder mutates **no**
+The mastery query is a plain, read-only storage read (`all_topic_card_rows`): it
+opens no transaction and records no undo step, and — unlike `transact_no_undo`
+(the wrapper Anki uses for db-check, which resets the undo history) — it leaves
+the existing undo history intact, so opening the readiness dashboard never costs
+the student a pending undo (proven by a unit test). The points-at-stake reorder mutates **no**
 `card.due` and writes nothing — it is a pure in-memory permutation of a
 transient vector — so the undo history is left completely intact across a queue
 build (also unit-tested) and there is no integrity risk. These invariants ("don't break
