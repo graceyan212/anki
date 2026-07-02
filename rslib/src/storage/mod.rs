@@ -15,6 +15,8 @@ mod sqlite;
 mod sync;
 mod sync_check;
 mod tag;
+// GMAT fork (T2): per-topic mastery aggregate.
+pub(crate) mod topic_stats;
 mod upgrades;
 
 use std::fmt::Write;

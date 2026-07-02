@@ -64,6 +64,11 @@ service SchedulerService {
   // The number of days the calculated interval was fuzzed by on the previous
   // review (if any). Utilized by the FSRS add-on.
   rpc FuzzDelta(FuzzDeltaRequest) returns (FuzzDeltaResponse);
+  // GMAT fork (T2): read-only per-topic mastery aggregate. Topics are parsed
+  // from notes.tags using the `Section::Topic::Subtopic` convention. Backed by
+  // a single aggregate SQL query so it stays fast on large collections.
+  rpc GetTopicMasteryStats(GetTopicMasteryStatsRequest)
+      returns (GetTopicMasteryStatsResponse);
 }
 
 // Implicitly includes any of the above methods that are not listed in the
@@ -482,4 +487,38 @@ message FuzzDeltaRequest {
 
 message FuzzDeltaResponse {
   sint32 delta_days = 1;
+}
+
+// GMAT fork (T2): per-topic mastery aggregate.
+
+message GetTopicMasteryStatsRequest {
+  // Tag-prefix depth to group by. The taxonomy is `Section::Topic::Subtopic`;
+  // 2 groups at the `Section::Topic` level (the contract's recommended match
+  // depth), 1 groups by `Section`, 3 by the full leaf tag.
+  uint32 topic_depth = 1;
+  // Interval (in days) at or above which a card counts as "mastered".
+  // Defaults to 21 when zero (the SM-2 "young/mature" boundary).
+  uint32 mastered_interval_days = 2;
+  // FSRS retrievability threshold (0.0-1.0). When a card has an FSRS
+  // memory_state, retrievability at or above this also counts as mastered.
+  // Defaults to 0.9 when zero.
+  float mastered_retrievability = 3;
+}
+
+message TopicMasteryStat {
+  // The grouped topic tag prefix, e.g. "Quant::Arithmetic".
+  string topic = 1;
+  // Total review-eligible cards carrying a tag under this topic.
+  uint32 total_cards = 2;
+  // Cards considered mastered (interval threshold or FSRS retrievability).
+  uint32 mastered_cards = 3;
+  // Average recall (passed reviews / total reviews) across the topic's
+  // revlog, in the range 0.0-1.0. Zero when there are no reviews yet.
+  float average_recall = 4;
+  // Mastery fraction: mastered_cards / total_cards, 0.0-1.0.
+  float mastery = 5;
+}
+
+message GetTopicMasteryStatsResponse {
+  repeated TopicMasteryStat topics = 1;
 }

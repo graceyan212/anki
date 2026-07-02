@@ -14,6 +14,8 @@ use anki_proto::scheduler::FsrsBenchmarkResponse;
 use anki_proto::scheduler::FuzzDeltaRequest;
 use anki_proto::scheduler::FuzzDeltaResponse;
 use anki_proto::scheduler::GetOptimalRetentionParametersResponse;
+use anki_proto::scheduler::GetTopicMasteryStatsRequest;
+use anki_proto::scheduler::GetTopicMasteryStatsResponse;
 use anki_proto::scheduler::SimulateFsrsReviewRequest;
 use anki_proto::scheduler::SimulateFsrsReviewResponse;
 use anki_proto::scheduler::SimulateFsrsWorkloadResponse;
@@ -381,6 +383,13 @@ impl crate::services::SchedulerService for Collection {
         Ok(FuzzDeltaResponse {
             delta_days: self.get_fuzz_delta(input.card_id.into(), input.interval)?,
         })
+    }
+
+    fn get_topic_mastery_stats(
+        &mut self,
+        input: GetTopicMasteryStatsRequest,
+    ) -> Result<GetTopicMasteryStatsResponse> {
+        self.get_topic_mastery_stats(input)
     }
 }
 

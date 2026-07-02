@@ -70,6 +70,10 @@ def show(mw: aqt.AnkiQt) -> QDialog:
     abouttext += f"<p>{lede}"
     abouttext += f"<p>{tr.about_anki_is_licensed_under_the_agpl3()}"
     abouttext += f"<p>{tr.about_version(val=version_with_build())}<br>"
+    # Rust core -> rsbridge (PyO3) -> Python -> Qt UI marker for the GMAT fork.
+    from anki import _rsbridge
+
+    abouttext += f"{_rsbridge.gmat_marker()}<br>"
     abouttext += ("Python %s Qt %s Chromium %s<br>") % (
         platform.python_version(),
         qVersion(),

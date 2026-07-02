@@ -24,6 +24,11 @@ fn buildhash() -> &'static str {
 }
 
 #[pyfunction]
+fn gmat_marker() -> &'static str {
+    anki::version::gmat_marker()
+}
+
+#[pyfunction]
 #[pyo3(signature = (path=None))]
 fn initialize_logging(path: Option<&str>) -> PyResult<()> {
     set_global_logger(path).map_err(|e| PyException::new_err(e.to_string()))
@@ -88,6 +93,7 @@ impl Backend {
 fn _rsbridge(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Backend>()?;
     m.add_wrapped(wrap_pyfunction!(buildhash)).unwrap();
+    m.add_wrapped(wrap_pyfunction!(gmat_marker)).unwrap();
     m.add_wrapped(wrap_pyfunction!(open_backend)).unwrap();
     m.add_wrapped(wrap_pyfunction!(initialize_logging)).unwrap();
     m.add_wrapped(wrap_pyfunction!(syncserver)).unwrap();
