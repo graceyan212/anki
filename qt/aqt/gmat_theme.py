@@ -33,6 +33,8 @@ Importing this module then calling ``init()`` is the only wiring required
 
 from __future__ import annotations
 
+import re
+
 import aqt
 from aqt import gui_hooks
 from aqt.qt import QFont
@@ -238,7 +240,7 @@ def _on_webview_will_set_content(web_content: WebContent, context: object | None
     overwrite). ``head`` is emitted last in <head>, after Anki's :root vars, so
     our overrides win. Re-fires automatically on theme change, so it persists
     across night-mode toggles."""
-    web_content.head += _BAUHAUS_WEBVIEW_CSS
+    web_content.head += _BAUHAUS_WEBVIEW_CSS + _CARD_CSS
 
 
 # --- 3) QApplication base font ----------------------------------------------
@@ -249,6 +251,121 @@ def _set_base_font() -> None:
         aqt.mw.app.setFont(QFont(BAUHAUS_FONT_FAMILY))
 
 
+# --- 4) GMAT card content transform (desktop reviewer) -----------------------
+#
+# Reshapes GMAT multiple-choice cards into the same Bauhaus layout the iOS app
+# renders (square A-E markers, green correct-answer highlight, EXPLANATION
+# block), so the desktop reviewer matches the mockup rather than being stock
+# layout in Futura. Done server-side via the card_will_show FILTER: a <script>
+# injected into card HTML would not execute, so the reshape happens in Python
+# and returns ready-to-show HTML. Non-MC cards (plain front/back memory cards,
+# or any non-GMAT deck) return None and pass through unchanged, styled by the
+# theme layer alone. The .gmat-card CSS ships in _CARD_CSS (injected into every
+# webview head above).
+
+_CARD_CSS = (
+    """
+<style id="gmat-bauhaus-card">
+.gmat-card { font-family: __FONT__; color: __INK__; text-align: left; }
+.gmat-card .stem { font-weight: 500; font-size: 20px; line-height: 1.42; margin: 0 0 22px; }
+.gmat-card .choices { display: flex; flex-direction: column; gap: 12px; margin: 0; }
+.gmat-card .choice { display: flex; align-items: flex-start; gap: 14px; padding: 4px; border: 2.5px solid transparent; }
+.gmat-card .marker { flex: 0 0 auto; width: 32px; height: 32px; box-sizing: border-box; border: 2.5px solid __INK__; background: __PAPER__; color: __INK__; font-weight: 700; font-size: 16px; line-height: 1; display: flex; align-items: center; justify-content: center; }
+.gmat-card .choice-text { font-weight: 500; font-size: 19px; line-height: 1.35; padding-top: 4px; }
+.gmat-card .choice.correct { border: 2.5px solid __GREEN__; }
+.gmat-card .choice.correct .marker { background: __GREEN__; border-color: __GREEN__; color: __PAPER__; }
+.gmat-card .answer-flag { align-self: flex-start; margin-left: auto; background: __GREEN__; color: __PAPER__; font-weight: 700; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; padding: 4px 8px; line-height: 1; }
+.gmat-card .rule { border: 0; height: 5px; background: __INK__; margin: 26px 0 0; }
+.gmat-card .explanation-tab { display: inline-block; background: __INK__; color: __PAPER__; font-weight: 700; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; padding: 6px 12px; margin: 14px 0; }
+.gmat-card .explanation-body { font-weight: 400; font-size: 19px; line-height: 1.55; }
+.gmat-card .explanation-body b, .gmat-card .explanation-body strong { font-weight: 700; }
+</style>
+"""
+    .replace("__FONT__", BAUHAUS_FONT_STACK)
+    .replace("__INK__", BAUHAUS_INK)
+    .replace("__PAPER__", BAUHAUS_PAPER)
+    .replace("__GREEN__", BAUHAUS_GREEN)
+)
+
+_CHOICE_RE = re.compile(r"^\s*([A-E])[).]\s*(.*)$")
+_HR_ANSWER_RE = re.compile(r"<hr[^>]*id=[\"']?answer[\"']?[^>]*>", re.I)
+_BR_RE = re.compile(r"<br\s*/?>", re.I)
+_TAG_RE = re.compile(r"<[^>]+>")
+_MARKER_STRIP_RE = re.compile(r"^\s*(?:<[^>]+>\s*)*[A-E][).]\s*", re.I)
+_ANSWER_LETTER_RE = re.compile(r"Answer:\s*(?:</b>)?\s*([A-E])", re.I)
+_EXPLANATION_RE = re.compile(r"Explanation:\s*(?:</b>)?\s*([\s\S]*)$", re.I)
+
+
+def _transform_card(text: str) -> str | None:
+    """Bauhaus card HTML for a GMAT multiple-choice card, or None if the text is
+    not an A-E multiple-choice card (the caller then passes it through)."""
+    parts = _HR_ANSWER_RE.split(text, maxsplit=1)
+    front = parts[0]
+    back = parts[1] if len(parts) > 1 else None
+
+    lines = _BR_RE.split(front)
+    first = -1
+    for i, line in enumerate(lines):
+        if _CHOICE_RE.match(_TAG_RE.sub("", line).strip()):
+            first = i
+            break
+    if first == -1:
+        return None
+
+    stem_html = "<br>".join(lines[:first]).strip()
+    choices: list[tuple[str, str]] = []
+    for line in lines[first:]:
+        m = _CHOICE_RE.match(_TAG_RE.sub("", line).strip())
+        if m:
+            # Keep the ORIGINAL choice HTML (minus the leading "A)" marker) so
+            # entities like &lt; render literally and inline formatting survives.
+            choice_html = _MARKER_STRIP_RE.sub("", line).strip()
+            choices.append((m.group(1).upper(), choice_html))
+    if not choices:
+        return None
+
+    correct = None
+    explanation = None
+    if back:
+        am = _ANSWER_LETTER_RE.search(back)
+        if am:
+            correct = am.group(1).upper()
+        em = _EXPLANATION_RE.search(back)
+        if em:
+            explanation = em.group(1).strip()
+
+    out = ['<div class="gmat-card">']
+    if stem_html:
+        out.append(f'<div class="stem">{stem_html}</div>')
+    out.append('<div class="choices">')
+    for letter, choice_html in choices:
+        is_correct = bool(correct and letter == correct)
+        out.append(f'<div class="choice{" correct" if is_correct else ""}">')
+        out.append(f'<div class="marker">{letter}</div>')
+        out.append(f'<div class="choice-text">{choice_html}</div>')
+        if is_correct:
+            out.append('<span class="answer-flag">Answer</span>')
+        out.append("</div>")
+    out.append("</div>")
+    if back:
+        # Keep id="answer" so Anki's scroll-to-answer still works.
+        out.append('<hr id="answer" class="rule">')
+        out.append('<div class="explanation-tab">Explanation</div>')
+        out.append(f'<div class="explanation-body">{explanation if explanation else back}</div>')
+    out.append("</div>")
+    return "".join(out)
+
+
+def _on_card_will_show(text: str, card: object, kind: str) -> str:
+    """FILTER: reshape GMAT MC cards into the Bauhaus layout. Defensive: any
+    non-MC card or error passes the original text through unchanged."""
+    try:
+        transformed = _transform_card(text)
+        return transformed if transformed is not None else text
+    except Exception:  # pragma: no cover - a theming error must not hide a card
+        return text
+
+
 def init() -> None:
     """Register the theme layer. Importing this module then calling init() is
     the only wiring required (done from aqt.main)."""
@@ -256,6 +373,8 @@ def init() -> None:
     gui_hooks.style_did_init.append(_append_bauhaus_qss)
     # 2) per-webview CSS injection (fires for every AnkiWebView).
     gui_hooks.webview_will_set_content.append(_on_webview_will_set_content)
+    # 2b) reshape GMAT multiple-choice cards into the Bauhaus card layout.
+    gui_hooks.card_will_show.append(_on_card_will_show)
     # 3) real QApplication base font, set once the window is up.
     gui_hooks.main_window_did_init.append(_set_base_font)
 
