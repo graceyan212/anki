@@ -207,6 +207,7 @@ fn parse_aidiff(tags: &str) -> Option<f32> {
         .filter_map(|tag| tag.split_once("::"))
         .filter(|(head, _)| head.eq_ignore_ascii_case("aidiff"))
         .find_map(|(_, value)| value.parse::<f32>().ok())
+        .filter(|d| d.is_finite()) // reject aidiff::nan / ::inf so theta can't go NaN
         .map(|d| d.clamp(0.0, 100.0))
 }
 
@@ -251,6 +252,10 @@ mod test {
         // no difficulty tag at all -> None.
         assert_eq!(note_difficulty("Quant::Arithmetic split::train"), None);
         assert_eq!(note_difficulty("difficulty::trivial"), None);
+        // aidiff::nan / non-finite must be rejected (a NaN would poison theta).
+        assert_eq!(parse_aidiff("aidiff::nan"), None);
+        assert_eq!(parse_aidiff("aidiff::inf"), None);
+        assert_eq!(note_difficulty("aidiff::nan difficulty::hard"), Some(COARSE_HARD));
     }
 
     #[test]

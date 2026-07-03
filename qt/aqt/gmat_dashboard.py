@@ -228,11 +228,10 @@ class GmatReadinessDialog(QDialog):
         )
 
         # The three shared-engine scores (memory / performance / readiness),
-        # identical to what the phone shows.
+        # identical to what the phone shows. This is the canonical readiness
+        # display; the separate 0-100 readiness bar was removed so the panel
+        # never shows two different "readiness" figures at once.
         parts.append(self._three_scores_html())
-
-        if not result.abstained:
-            parts.append(self._score_bar_html(result))
 
         # Evidence stats: three big tabular numbers with uppercase labels under
         # them, laid out as a bordered table (ink hairlines between cells).

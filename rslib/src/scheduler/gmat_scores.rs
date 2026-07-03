@@ -268,7 +268,11 @@ fn difficulty_0_100(tags: &str) -> f64 {
     for tag in tags.split_whitespace() {
         if let Some(rest) = tag.strip_prefix("aidiff::") {
             if let Ok(n) = rest.parse::<f64>() {
-                return n.clamp(0.0, 100.0);
+                // reject aidiff::nan / ::inf: NaN.clamp() stays NaN and would
+                // poison theta and every score. Fall through to the coarse tag.
+                if n.is_finite() {
+                    return n.clamp(0.0, 100.0);
+                }
             }
         }
     }
@@ -478,6 +482,17 @@ mod tests {
             coverage_fraction(&rows) > 0.0,
             "a leading id:: tag must not hide the topic from coverage"
         );
+    }
+
+    #[test]
+    fn difficulty_ignores_non_finite_aidiff() {
+        // aidiff::nan must fall through to the coarse tag: NaN.clamp() stays NaN
+        // and would poison theta and every downstream score.
+        assert_eq!(
+            difficulty_0_100("aidiff::nan Quant::Arithmetic::Percents difficulty::hard"),
+            80.0
+        );
+        assert!(difficulty_0_100("aidiff::72").is_finite());
     }
 
     #[test]
