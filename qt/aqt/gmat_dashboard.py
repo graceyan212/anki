@@ -51,6 +51,7 @@ from aqt.utils import disable_help_button, restoreGeom, saveGeom
 
 if TYPE_CHECKING:
     from aqt.main import AnkiQt
+    from aqt.toolbar import Toolbar
 
 # The deck the readiness summary scopes to. None => whole collection.
 GMAT_DECK_NAME = "GMAT Focus"
@@ -485,7 +486,25 @@ def _on_main_window_did_init() -> None:
     mw.form.menuTools.addAction(action)
 
 
+def _on_top_toolbar_did_init_links(links: list[str], toolbar: Toolbar) -> None:
+    """Add a 'Readiness' link to the top toolbar so the dashboard opens from
+    inside the main window, not only the Tools menu / macOS menu bar."""
+    mw = aqt.mw
+    if mw is None:
+        return
+    links.append(
+        toolbar.create_link(
+            "gmat_readiness",
+            "Readiness",
+            lambda: show_gmat_readiness(mw),
+            tip="GMAT Readiness",
+            id="gmat_readiness",
+        )
+    )
+
+
 def init() -> None:
-    """Register the hook. Importing this module then calling init() is the only
+    """Register the hooks. Importing this module then calling init() is the only
     wiring required (done from aqt.main)."""
     aqt.gui_hooks.main_window_did_init.append(_on_main_window_did_init)
+    aqt.gui_hooks.top_toolbar_did_init_links.append(_on_top_toolbar_did_init_links)
