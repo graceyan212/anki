@@ -29,13 +29,18 @@ SELECT c.nid,
     ELSE NULL
   END AS decay,
   coalesce(r.passed, 0) AS passed,
-  coalesce(r.total, 0) AS total
+  coalesce(r.total, 0) AS total,
+  -- Epoch-ms of the most recent genuine review (revlog.id IS the timestamp);
+  -- NULL when never reviewed. Added for the T3 memory score (recall-now needs
+  -- elapsed days). The T2 mastery query ignores this trailing column.
+  r.last_review_ms AS last_review_ms
 FROM cards c
   JOIN notes n ON c.nid = n.id
   LEFT JOIN (
     SELECT cid,
       sum(ease >= 2) AS passed,
-      COUNT(*) AS total
+      COUNT(*) AS total,
+      max(id) AS last_review_ms
     FROM revlog
     WHERE ease > 0
       AND type != 4

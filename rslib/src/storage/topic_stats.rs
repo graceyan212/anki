@@ -34,6 +34,10 @@ pub(crate) struct TopicCardRow {
     pub passed: u32,
     /// Total genuine reviews in the revlog.
     pub total: u32,
+    /// Epoch-ms of the card's most recent genuine review (revlog.id), or None if
+    /// never reviewed. Added for the T3 memory score; the T2 mastery query
+    /// ignores it.
+    pub last_review_ms: Option<i64>,
 }
 
 impl SqliteStorage {
@@ -51,6 +55,7 @@ impl SqliteStorage {
                     decay: row.get(4)?,
                     passed: row.get::<_, i64>(5)?.max(0) as u32,
                     total: row.get::<_, i64>(6)?.max(0) as u32,
+                    last_review_ms: row.get(7)?,
                 })
             })?
             .collect()

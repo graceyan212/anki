@@ -384,6 +384,7 @@ mod test {
             decay: Some(0.1542),
             passed: 0,
             total: 0,
+            last_review_ms: None,
         };
         assert!(
             is_mastered(&stored, horizon_days, threshold),
@@ -414,6 +415,7 @@ mod test {
             decay: None,
             passed: 0,
             total: 0,
+            last_review_ms: None,
         };
         assert!(is_mastered(&by_ivl, 21, 0.9));
 
@@ -426,6 +428,7 @@ mod test {
             decay: None,
             passed: 0,
             total: 0,
+            last_review_ms: None,
         };
         assert!(is_mastered(&by_fsrs, 21, 0.9));
 
@@ -438,6 +441,7 @@ mod test {
             decay: None,
             passed: 0,
             total: 0,
+            last_review_ms: None,
         };
         assert!(!is_mastered(&weak, 21, 0.9));
     }
