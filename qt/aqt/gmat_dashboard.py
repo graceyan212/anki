@@ -181,6 +181,15 @@ class GmatReadinessDialog(QDialog):
         if col.decks.id_for_name(deck_name) is None:
             deck_name = None
 
+        # The three shared-engine scores (memory / performance / readiness) come
+        # from the Rust GetGmatScores RPC, so desktop and phone render identical
+        # numbers. The detailed coverage/give-up body below still uses the Python
+        # readiness computation.
+        try:
+            self._scores = col._backend.get_gmat_scores(deck_name=deck_name or "")
+        except Exception:
+            self._scores = None
+
         result = compute_readiness(col, deck_name=deck_name)
         self._render(result, deck_name)
 
@@ -232,6 +241,10 @@ class GmatReadinessDialog(QDialog):
             f"DECK &nbsp;·&nbsp; {scope.upper()}</p>"
         )
 
+        # The three shared-engine scores (memory / performance / readiness),
+        # identical to what the phone shows.
+        parts.append(self._three_scores_html())
+
         if not result.abstained:
             parts.append(self._score_bar_html(result))
 
@@ -250,6 +263,57 @@ class GmatReadinessDialog(QDialog):
         parts.append(self._rule_note_html(result))
 
         return "".join(parts)
+
+    def _three_scores_html(self) -> str:
+        """Render the three shared-engine scores (memory / performance /
+        readiness) as a compact Bauhaus table. Each row shows the number + range
+        (with confidence for readiness), or the give-up state and what's still
+        missing. Data comes from the Rust GetGmatScores RPC (self._scores)."""
+        scores = getattr(self, "_scores", None)
+        if scores is None:
+            return ""
+        rows = [
+            ("MEMORY", BAUHAUS_GREEN, scores.memory),
+            ("PERFORMANCE", BAUHAUS_YELLOW, scores.performance),
+            ("READINESS", BAUHAUS_BLUE, scores.readiness),
+        ]
+        cells: list[str] = []
+        for label, accent, sv in rows:
+            if sv.abstained:
+                value_html = (
+                    f"<span style='font-size:15px; font-weight:bold;"
+                    f" color:{BAUHAUS_INK};'>NOT ENOUGH DATA YET</span>"
+                )
+                detail = html.escape("; ".join(sv.missing))
+            else:
+                n = int(round(sv.score))
+                unit = "" if sv.unit == "gmat" else " / 100"
+                detail = (
+                    f"range {int(round(sv.low))}&#8211;{int(round(sv.high))}"
+                )
+                if sv.confidence:
+                    detail += f" &nbsp;·&nbsp; confidence {html.escape(sv.confidence)}"
+                value_html = (
+                    f"<span style='font-size:22px; font-weight:bold;"
+                    f" color:{BAUHAUS_INK};'>{n}{unit}</span>"
+                )
+            cells.append(
+                f"<tr>"
+                f"<td width='16' valign='top' bgcolor='{accent}'"
+                f" style='background-color:{accent};'>&nbsp;</td>"
+                f"<td style='padding:6px 10px; border-bottom:1px solid {BAUHAUS_HOLLOW};'>"
+                f"<div style='font-size:10px; font-weight:bold;"
+                f" color:{BAUHAUS_MUTED};'>{label}</div>"
+                f"{value_html}"
+                f"<div style='font-size:11px; color:{BAUHAUS_INK};'>{detail}</div>"
+                f"</td>"
+                f"</tr>"
+            )
+        return (
+            f"<table cellspacing='0' cellpadding='0' width='100%'"
+            f" style='border:2px solid {BAUHAUS_INK}; border-collapse:collapse;"
+            f" margin:0 0 16px 0;'>" + "".join(cells) + "</table>"
+        )
 
     def _score_bar_html(self, result: ReadinessResult) -> str:
         """Approximate the score bar with a two-cell coloured table row.
