@@ -115,10 +115,12 @@ class GmatReadinessDialog(QDialog):
         # In-pane Bauhaus brand header: geometric mark + wordmark + 3px ink rule,
         # matching the approved mockup (and the iOS app header).
         self._brand = QLabel(self)
+        # Per-glyph sizes so the three shapes read as visually equal — the ▲
+        # glyph is drawn heavier than ● / ■ at a common size, so it's dialed down.
         self._brand.setText(
-            f"<span style='color:{BAUHAUS_RED};'>&#9679;</span>"
-            f"<span style='color:{BAUHAUS_BLUE};'>&nbsp;&#9632;</span>"
-            f"<span style='color:{BAUHAUS_YELLOW};'>&nbsp;&#9650;</span>"
+            f"<span style='color:{BAUHAUS_RED}; font-size:15px;'>&#9679;</span>"
+            f"<span style='color:{BAUHAUS_BLUE}; font-size:14px;'>&nbsp;&#9632;</span>"
+            f"<span style='color:{BAUHAUS_YELLOW}; font-size:11px;'>&nbsp;&#9650;</span>"
             f"<span style='color:{BAUHAUS_INK}; font-weight:bold;'>"
             f"&nbsp;&nbsp;GMAT READINESS</span>"
         )
@@ -194,30 +196,14 @@ class GmatReadinessDialog(QDialog):
         self._render(result, deck_name)
 
     def _render(self, result: ReadinessResult, deck_name: str | None) -> None:
-        if result.abstained:
-            # ABSTAIN: yellow caution accent (replaces the old amber #b58900).
-            self._headline.setText("NOT ENOUGH DATA YET")
-            self._headline.setStyleSheet(
-                f"color: {BAUHAUS_INK};"
-                f" background-color: {BAUHAUS_YELLOW};"
-                " padding: 6px 12px;"
-            )
-            self._subhead.setText(
-                "No number you can trust yet. "
-                "Here's exactly what's left before a score shows:"
-            )
-        else:
-            assert result.score is not None
-            # SCORE: the big score /100 in ink. The "GMAT READINESS" wordmark in
-            # the brand header carries the name, so the headline is just the
-            # number itself, big and bold.
-            self._headline.setText(f"{result.score:.0f} / 100")
-            self._headline.setStyleSheet(f"color: {BAUHAUS_INK};")
-            self._subhead.setText(
-                f"Likely range {result.score_low:.0f}–{result.score_high:.0f}, "
-                f"from your recall across {result.scored_cards} exam cards."
-            )
-
+        # The three shared-engine scores (memory / performance / readiness) are
+        # now the hero, rendered as three separate blocks in the body below. The
+        # old single-readiness headline duplicated the readiness row, wasn't
+        # labelled (so you couldn't tell which score it was), and its yellow
+        # "abstain" fill clashed with the yellow performance accent — so it's
+        # retired. Keeping the widgets but hidden avoids reworking the layout.
+        self._headline.setVisible(False)
+        self._subhead.setVisible(False)
         self._body.setHtml(self._body_html(result, deck_name))
 
     def _body_html(self, result: ReadinessResult, deck_name: str | None) -> str:
@@ -277,43 +263,41 @@ class GmatReadinessDialog(QDialog):
             ("PERFORMANCE", BAUHAUS_YELLOW, scores.performance),
             ("READINESS", BAUHAUS_BLUE, scores.readiness),
         ]
-        cells: list[str] = []
+        blocks: list[str] = []
         for label, accent, sv in rows:
             if sv.abstained:
                 value_html = (
-                    f"<span style='font-size:15px; font-weight:bold;"
-                    f" color:{BAUHAUS_INK};'>NOT ENOUGH DATA YET</span>"
+                    f"<span style='font-size:16px; font-weight:bold;"
+                    f" color:{BAUHAUS_MUTED};'>NOT ENOUGH DATA YET</span>"
                 )
                 detail = html.escape("; ".join(sv.missing))
             else:
                 n = int(round(sv.score))
                 unit = "" if sv.unit == "gmat" else " / 100"
-                detail = (
-                    f"range {int(round(sv.low))}&#8211;{int(round(sv.high))}"
-                )
+                detail = f"range {int(round(sv.low))}&#8211;{int(round(sv.high))}"
                 if sv.confidence:
                     detail += f" &nbsp;·&nbsp; confidence {html.escape(sv.confidence)}"
                 value_html = (
-                    f"<span style='font-size:22px; font-weight:bold;"
-                    f" color:{BAUHAUS_INK};'>{n}{unit}</span>"
+                    f"<span style='font-size:32px; font-weight:bold;"
+                    f" color:{BAUHAUS_INK};'>{n}</span>"
+                    f"<span style='font-size:15px; color:{BAUHAUS_MUTED};'>{unit}</span>"
                 )
-            cells.append(
-                f"<tr>"
-                f"<td width='16' valign='top' bgcolor='{accent}'"
+            # Each score is its OWN bordered block with a colour accent stripe,
+            # separated by margin — breathing room instead of a cramped stack.
+            blocks.append(
+                f"<table cellspacing='0' cellpadding='0' width='100%'"
+                f" style='border-collapse:collapse; border:2px solid {BAUHAUS_INK};"
+                f" margin:0 0 10px 0;'><tr>"
+                f"<td width='10' bgcolor='{accent}'"
                 f" style='background-color:{accent};'>&nbsp;</td>"
-                f"<td style='padding:6px 10px; border-bottom:1px solid {BAUHAUS_HOLLOW};'>"
-                f"<div style='font-size:10px; font-weight:bold;"
+                f"<td style='padding:11px 14px;'>"
+                f"<div style='font-size:10px; font-weight:bold; letter-spacing:1px;"
                 f" color:{BAUHAUS_MUTED};'>{label}</div>"
                 f"{value_html}"
                 f"<div style='font-size:11px; color:{BAUHAUS_INK};'>{detail}</div>"
-                f"</td>"
-                f"</tr>"
+                f"</td></tr></table>"
             )
-        return (
-            f"<table cellspacing='0' cellpadding='0' width='100%'"
-            f" style='border:2px solid {BAUHAUS_INK}; border-collapse:collapse;"
-            f" margin:0 0 16px 0;'>" + "".join(cells) + "</table>"
-        )
+        return "".join(blocks)
 
     def _score_bar_html(self, result: ReadinessResult) -> str:
         """Approximate the score bar with a two-cell coloured table row.
