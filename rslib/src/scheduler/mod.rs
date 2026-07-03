@@ -19,6 +19,7 @@ mod service;
 pub mod states;
 pub mod timespan;
 pub mod timing;
+mod gmat_scores;
 mod topic_mastery;
 mod upgrade;
 

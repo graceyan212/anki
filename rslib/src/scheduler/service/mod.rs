@@ -13,9 +13,11 @@ use anki_proto::scheduler::ComputeOptimalRetentionResponse;
 use anki_proto::scheduler::FsrsBenchmarkResponse;
 use anki_proto::scheduler::FuzzDeltaRequest;
 use anki_proto::scheduler::FuzzDeltaResponse;
+use anki_proto::scheduler::GetGmatScoresRequest;
 use anki_proto::scheduler::GetOptimalRetentionParametersResponse;
 use anki_proto::scheduler::GetTopicMasteryStatsRequest;
 use anki_proto::scheduler::GetTopicMasteryStatsResponse;
+use anki_proto::scheduler::GmatScores;
 use anki_proto::scheduler::SimulateFsrsReviewRequest;
 use anki_proto::scheduler::SimulateFsrsReviewResponse;
 use anki_proto::scheduler::SimulateFsrsWorkloadResponse;
@@ -390,6 +392,10 @@ impl crate::services::SchedulerService for Collection {
         input: GetTopicMasteryStatsRequest,
     ) -> Result<GetTopicMasteryStatsResponse> {
         self.get_topic_mastery_stats(input)
+    }
+
+    fn get_gmat_scores(&mut self, input: GetGmatScoresRequest) -> Result<GmatScores> {
+        self.get_gmat_scores(input)
     }
 }
 

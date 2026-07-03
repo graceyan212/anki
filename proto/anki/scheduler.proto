@@ -69,6 +69,9 @@ service SchedulerService {
   // a single aggregate SQL query so it stays fast on large collections.
   rpc GetTopicMasteryStats(GetTopicMasteryStatsRequest)
       returns (GetTopicMasteryStatsResponse);
+  // GMAT fork (T3): read-only three-score summary (memory / performance /
+  // readiness), each with a range + per-score give-up rule.
+  rpc GetGmatScores(GetGmatScoresRequest) returns (GmatScores);
 }
 
 // Implicitly includes any of the above methods that are not listed in the
@@ -521,4 +524,34 @@ message TopicMasteryStat {
 
 message GetTopicMasteryStatsResponse {
   repeated TopicMasteryStat topics = 1;
+}
+
+// GMAT fork (T3): the three scores (memory / performance / readiness).
+
+message GetGmatScoresRequest {
+  // Deck to scope to; empty = whole collection.
+  string deck_name = 1;
+}
+
+// A single score with its honest-uncertainty range and give-up state.
+message ScoreValue {
+  // When true, there is not enough data yet: `missing` says what is needed and
+  // score/low/high are unset (give-up rule).
+  bool abstained = 1;
+  double score = 2;  // valid only when !abstained
+  double low = 3;
+  double high = 4;
+  string unit = 5;  // "pct" (memory/performance) | "gmat" (readiness)
+  // Readiness only: "low" | "medium" | "high" (empty for the others).
+  string confidence = 6;
+  // Main drivers behind the number (traceable rationale).
+  repeated string reasons = 7;
+  // What data is still needed before a number shows (give-up display).
+  repeated string missing = 8;
+}
+
+message GmatScores {
+  ScoreValue memory = 1;
+  ScoreValue performance = 2;
+  ScoreValue readiness = 3;
 }
