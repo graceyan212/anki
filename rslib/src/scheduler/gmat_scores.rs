@@ -366,17 +366,19 @@ fn coverage_fraction(rows: &[TopicCardRow]) -> f64 {
     covered as f64 / OUTLINE_TOPICS.len() as f64
 }
 
-/// The card's topic tag: the first `::`-bearing tag that is not an orthogonal
-/// `difficulty::` / `split::` / `type::` / `aidiff::` tag.
+/// The card's topic tag: the first `::`-bearing tag whose level-1 namespace is a
+/// known GMAT section (Quant / Verbal / DataInsights). An allowlist, so all
+/// orthogonal metadata (difficulty::, split::, type::, aidiff::, id::, kind::,
+/// of::, …) is ignored. A previous blocklist missed `id::` and picked it as the
+/// topic, collapsing coverage to ~18% even when every topic had been studied.
 fn card_topic_tag(tags: &str) -> Option<&str> {
     tags.split_whitespace()
         .filter(|t| t.contains("::"))
         .find(|t| {
             let head = t.split("::").next().unwrap_or("");
-            !head.eq_ignore_ascii_case("difficulty")
-                && !head.eq_ignore_ascii_case("split")
-                && !head.eq_ignore_ascii_case("type")
-                && !head.eq_ignore_ascii_case("aidiff")
+            head.eq_ignore_ascii_case("Quant")
+                || head.eq_ignore_ascii_case("Verbal")
+                || head.eq_ignore_ascii_case("DataInsights")
         })
 }
 
@@ -462,6 +464,20 @@ mod tests {
         let sv = memory_score(&rows, NOW);
         assert!(sv.abstained);
         assert!(!sv.missing.is_empty());
+    }
+
+    #[test]
+    fn coverage_credits_topic_despite_leading_id_tag() {
+        // Real-deck tag ordering puts id:: (and difficulty::/split::) BEFORE the
+        // section topic; card_topic_tag + coverage must still find the topic.
+        // Regression: an old blocklist picked id:: as the topic -> ~18% coverage.
+        let tags = "difficulty::easy id::Q-PS-001 Quant::Arithmetic::Percents split::train";
+        assert_eq!(card_topic_tag(tags), Some("Quant::Arithmetic::Percents"));
+        let rows = vec![row(tags, Some(5.0), 3, 4, Some(NOW))];
+        assert!(
+            coverage_fraction(&rows) > 0.0,
+            "a leading id:: tag must not hide the topic from coverage"
+        );
     }
 
     #[test]

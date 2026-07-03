@@ -270,14 +270,18 @@ fn topic_prefix(tags: &str, depth: usize) -> Option<String> {
         })
 }
 
-/// The taxonomy reserves these level-1 namespaces for orthogonal metadata that
-/// is not a topic. Match is case-insensitive on the segment before the first
-/// `::`.
+/// A tag is a topic tag only when its level-1 namespace is a known GMAT section
+/// (Quant / Verbal / DataInsights); everything else is auxiliary. Using a
+/// section allowlist (rather than a blocklist of difficulty::/split::/type::)
+/// means orthogonal metadata like `id::`, `kind::`, `of::` and `aidiff::` is
+/// ignored too — a blocklist missed those, so a leading `id::` tag was mistaken
+/// for the topic and cards were mis-grouped by id. Case-insensitive on the
+/// segment before the first `::`.
 fn is_auxiliary_tag(tag: &str) -> bool {
     let head = tag.split("::").next().unwrap_or("");
-    head.eq_ignore_ascii_case("difficulty")
-        || head.eq_ignore_ascii_case("split")
-        || head.eq_ignore_ascii_case("type")
+    !(head.eq_ignore_ascii_case("Quant")
+        || head.eq_ignore_ascii_case("Verbal")
+        || head.eq_ignore_ascii_case("DataInsights"))
 }
 
 #[cfg(test)]
@@ -315,6 +319,24 @@ mod test {
         assert_eq!(
             topic_prefix("DataInsights::DataSufficiency split::gold", 2).as_deref(),
             Some("DataInsights::DataSufficiency"),
+        );
+        // id::/kind::/of:: are auxiliary too: with the real-deck tag ordering,
+        // a leading id:: must NOT be picked as the topic (the bug this fixes).
+        assert_eq!(
+            topic_prefix(
+                "difficulty::easy id::Q-PS-001 Quant::Arithmetic::Percents split::train",
+                3
+            )
+            .as_deref(),
+            Some("Quant::Arithmetic::Percents"),
+        );
+        assert_eq!(
+            topic_prefix(
+                "id::Q-PS-001-p1 kind::paraphrase of::Q-PS-001 Quant::Arithmetic::Percents",
+                2
+            )
+            .as_deref(),
+            Some("Quant::Arithmetic"),
         );
         // no topic tag at all
         assert_eq!(topic_prefix("leech marked", 2), None);
