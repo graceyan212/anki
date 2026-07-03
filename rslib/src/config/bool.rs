@@ -42,6 +42,9 @@ pub enum BoolKey {
     FsrsLegacyEvaluate,
     LoadBalancerEnabled,
     FsrsShortTermWithStepsEnabled,
+    /// GMAT fork: enable computer-adaptive (Rasch/1PL) difficulty-fit tie-break
+    /// in the review reorder. Defaults to false via the `other` arm below.
+    GmatAdaptiveEnabled,
     #[strum(to_string = "normalize_note_text")]
     NormalizeNoteText,
     #[strum(to_string = "dayLearnFirst")]

@@ -5,7 +5,7 @@ mod burying;
 mod gathering;
 pub(crate) mod intersperser;
 pub(crate) mod sized_chain;
-mod sorting;
+pub(crate) mod sorting;
 
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -187,12 +187,17 @@ impl QueueBuilder {
         mut self,
         learn_ahead_secs: i64,
         points_at_stake_weights: &HashMap<NoteId, f32>,
+        adaptive_fit: Option<&HashMap<NoteId, f32>>,
     ) -> CardQueues {
         self.sort_new();
         // GMAT fork (T2): points-at-stake review ordering, applied in memory
         // after self.review is populated by gather_cards (no card.due mutation,
-        // so undo is unaffected).
-        self.sort_review(points_at_stake_weights);
+        // so undo is unaffected). When adaptive selection is enabled, difficulty
+        // fit is a tie-break within the same weight order.
+        match adaptive_fit {
+            Some(fit) => self.sort_review_adaptive(points_at_stake_weights, fit),
+            None => self.sort_review(points_at_stake_weights),
+        }
 
         // intraday learning and total learn count
         let intraday_learning = sort_learning(self.learning);
@@ -299,7 +304,20 @@ impl Collection {
         // aggregate query) so the review queue can be reordered in memory.
         let points_at_stake_weights = self.points_at_stake_weights()?;
 
-        let queues = queues.build(self.learn_ahead_secs() as i64, &points_at_stake_weights);
+        // GMAT fork: when adaptive selection is enabled, also compute the
+        // per-note difficulty-fit distances (a second plain read) used as a
+        // tie-break within the weight order. Gated off by default.
+        let adaptive_fit = if self.get_config_bool(BoolKey::GmatAdaptiveEnabled) {
+            Some(self.adaptive_difficulty_fit()?)
+        } else {
+            None
+        };
+
+        let queues = queues.build(
+            self.learn_ahead_secs() as i64,
+            &points_at_stake_weights,
+            adaptive_fit.as_ref(),
+        );
 
         Ok(queues)
     }

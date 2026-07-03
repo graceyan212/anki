@@ -6,6 +6,7 @@ use crate::config::SchedulerVersion;
 use crate::error::Result;
 use crate::prelude::*;
 
+mod adaptive;
 pub mod answering;
 pub mod bury_and_suspend;
 pub(crate) mod congrats;

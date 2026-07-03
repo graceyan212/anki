@@ -32,6 +32,19 @@ impl QueueBuilder {
         reorder_reviews_by_weight(&mut self.review, weights);
     }
 
+    /// GMAT fork: adaptive review ordering. Primary key is the same descending
+    /// points-at-stake `weights` as `sort_review`; the difficulty-`fit` distance
+    /// (see `scheduler::adaptive`) is only a tie-break *within* an equal-weight
+    /// group, so the weakest-topic ordering is never overridden. Also a purely
+    /// in-memory reorder — no `card.due` is mutated, so undo is unaffected.
+    pub(super) fn sort_review_adaptive(
+        &mut self,
+        weights: &HashMap<NoteId, f32>,
+        fit: &HashMap<NoteId, f32>,
+    ) {
+        reorder_reviews_by_weight_then_fit(&mut self.review, weights, fit);
+    }
+
     pub(super) fn sort_new(&mut self) {
         match self.context.sort_options.new_order {
             // preserve gather order
@@ -84,6 +97,38 @@ fn reorder_reviews_by_weight(review: &mut [DueCard], weights: &HashMap<NoteId, f
         let wb = weights.get(&b.note_id).copied().unwrap_or(0.0);
         // Descending by weight; NaN-safe (NaN treated as equal/lowest).
         wb.partial_cmp(&wa).unwrap_or(Ordering::Equal)
+    });
+}
+
+/// GMAT fork: stable, in-memory reorder combining the points-at-stake weight
+/// (primary, descending — the weakest-topic ordering, unchanged) with the
+/// adaptive difficulty-fit distance (tie-break, ascending — nearest to ability
+/// first). A note absent from `fit` has no difficulty, so it sorts last within
+/// its weight group (`f32::INFINITY`). Factored out so it can be unit-tested
+/// without constructing a full `QueueBuilder`/`Context`.
+pub(crate) fn reorder_reviews_by_weight_then_fit(
+    review: &mut [DueCard],
+    weights: &HashMap<NoteId, f32>,
+    fit: &HashMap<NoteId, f32>,
+) {
+    if weights.is_empty() && fit.is_empty() {
+        // No ordering data (e.g. an untagged collection): keep DB order.
+        return;
+    }
+    // Stable sort so cards equal on both keys keep their incoming DB order.
+    review.sort_by(|a, b| {
+        let wa = weights.get(&a.note_id).copied().unwrap_or(0.0);
+        let wb = weights.get(&b.note_id).copied().unwrap_or(0.0);
+        // Primary: descending weight (NaN-safe).
+        match wb.partial_cmp(&wa).unwrap_or(Ordering::Equal) {
+            Ordering::Equal => {
+                // Tie-break: ascending fit distance; missing = last in the tie.
+                let fa = fit.get(&a.note_id).copied().unwrap_or(f32::INFINITY);
+                let fb = fit.get(&b.note_id).copied().unwrap_or(f32::INFINITY);
+                fa.partial_cmp(&fb).unwrap_or(Ordering::Equal)
+            }
+            other => other,
+        }
     });
 }
 
