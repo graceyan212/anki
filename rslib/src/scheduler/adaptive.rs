@@ -113,8 +113,44 @@ fn sigmoid(x: f32) -> f32 {
 /// observations. Factored out as a free function so it is unit-testable with
 /// synthetic data.
 fn estimate_theta(obs: &[(f32, u32, u32)]) -> f32 {
+    estimate_ability(obs).theta
+}
+
+/// A Rasch ability estimate: the point estimate θ plus its standard error.
+///
+/// Shared across the GMAT engine so the adaptive selector (this module) and the
+/// displayed performance score (`scheduler::gmat_scores`) use ONE estimator —
+/// the score you see and the card it shows can never disagree. The selector
+/// reads `theta`; the performance score reads `theta` for the number and
+/// `standard_error` for the range.
+pub(crate) struct AbilityEstimate {
+    /// Rasch ability θ (logit), clamped to `[-THETA_BOUND, THETA_BOUND]`.
+    pub theta: f32,
+    /// Standard error of θ = 1/√(Fisher information) at the MLE. `INFINITY`
+    /// when there is no information yet (no observations / saturated
+    /// probabilities); a caller can treat that as "no usable range yet".
+    // Read by scheduler::gmat_scores (the performance score's range); the
+    // selector in this module only needs `theta`.
+    #[allow(dead_code)]
+    pub standard_error: f32,
+}
+
+/// Shared Rasch ability estimator: maximise the 1PL log-likelihood over
+/// answered observations `(b, passed, total)` with Newton's method, returning
+/// θ and its standard error. Closed-form gradient/Hessian:
+///   `L'(θ)  = Σ [passed − total·p]`   (p = σ(θ − b))
+///   `L''(θ) = Σ [−total·p·(1 − p)]`   (≤ 0, so L is concave)
+/// θ starts at 0 and each Newton step is clamped to `[−THETA_BOUND,
+/// THETA_BOUND]`; with no observations θ = 0 and the standard error is
+/// infinite. The standard error is `1/√(Σ total·p·(1−p))` (the Fisher
+/// information) evaluated at the MLE. Factored out as a free function so it is
+/// unit-testable with synthetic data.
+pub(crate) fn estimate_ability(obs: &[(f32, u32, u32)]) -> AbilityEstimate {
     if obs.is_empty() {
-        return 0.0;
+        return AbilityEstimate {
+            theta: 0.0,
+            standard_error: f32::INFINITY,
+        };
     }
     let mut theta = 0.0_f32;
     for _ in 0..NEWTON_ITERS {
@@ -125,7 +161,7 @@ fn estimate_theta(obs: &[(f32, u32, u32)]) -> f32 {
             grad += passed as f32 - total as f32 * p;
             hess -= total as f32 * p * (1.0 - p);
         }
-        // Concave objective: the Hessian is ≤ 0. If it is ~0 the surface is
+        // Concave objective: the Hessian is <= 0. If it is ~0 the surface is
         // flat here (e.g. saturated probabilities), so stop rather than divide.
         if hess.abs() < 1e-6 {
             break;
@@ -136,7 +172,25 @@ fn estimate_theta(obs: &[(f32, u32, u32)]) -> f32 {
             break;
         }
     }
-    theta.clamp(-THETA_BOUND, THETA_BOUND)
+    theta = theta.clamp(-THETA_BOUND, THETA_BOUND);
+
+    // Standard error = 1/sqrt(Fisher information) at the MLE; infinite when
+    // there is no information (no trials, or fully saturated probabilities).
+    let mut info = 0.0_f32;
+    for &(b, _passed, total) in obs {
+        let p = sigmoid(theta - b);
+        info += total as f32 * p * (1.0 - p);
+    }
+    let standard_error = if info > 1e-6 {
+        1.0 / info.sqrt()
+    } else {
+        f32::INFINITY
+    };
+
+    AbilityEstimate {
+        theta,
+        standard_error,
+    }
 }
 
 /// A note's 0–100 difficulty: prefer the AI-rated `aidiff::NN` tag, else the
@@ -240,6 +294,21 @@ mod test {
             );
         }
         assert_eq!(estimate_theta(&[]), 0.0, "no observations -> θ = 0");
+    }
+
+    #[test]
+    fn standard_error_shrinks_with_more_data() {
+        let b = difficulty_to_logit(50.0);
+        // No observations -> infinite SE (no usable range yet).
+        assert!(estimate_ability(&[]).standard_error.is_infinite());
+        // Same pass ratio, 10x the trials -> tighter (smaller) standard error.
+        let few = estimate_ability(&[(b, 3, 5)]).standard_error;
+        let many = estimate_ability(&[(b, 30, 50)]).standard_error;
+        assert!(few.is_finite() && many.is_finite(), "few={few} many={many}");
+        assert!(
+            many < few,
+            "more answers should tighten the standard error: few={few} many={many}"
+        );
     }
 
     // --- end-to-end tests against a real Collection ---------------------------
