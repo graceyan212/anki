@@ -10,14 +10,14 @@
 //! test).
 //!
 //! The three are deliberately distinct measurements:
-//!   * memory      — current FSRS recall probability across studied cards
-//!                   (can they remember it right now?).
+//!   * memory — current FSRS recall probability across studied cards (can they
+//!     remember it right now?).
 //!   * performance — Rasch/1PL ability θ estimated from answer history vs. each
-//!                   item's difficulty (can they answer a new, exam-style
-//!                   question?). Difficulty comes from the AI `aidiff::NN` tag
-//!                   when present, else the coarse `difficulty::` tag.
-//!   * readiness   — θ mapped onto the GMAT 205–805 scale, discounted by topic
-//!                   coverage, with a confidence band (what would they score?).
+//!     item's difficulty (can they answer a new, exam-style question?).
+//!     Difficulty comes from the AI `aidiff::NN` tag when present, else the
+//!     coarse `difficulty::` tag.
+//!   * readiness — θ mapped onto the GMAT 205–805 scale, discounted by topic
+//!     coverage, with a confidence band (what would they score?).
 //!
 //! Each score carries a range and an independent give-up rule: it abstains with
 //! a `missing` list until it has enough of its own data.
@@ -561,7 +561,7 @@ mod tests {
         let perf = PerfEstimate::from_rows(&rows);
         let sv = readiness_score(&rows, &perf);
         assert!(sv.abstained);
-        assert!(sv.missing.len() >= 1);
+        assert!(!sv.missing.is_empty());
     }
 
     #[test]
