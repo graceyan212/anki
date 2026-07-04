@@ -66,6 +66,7 @@ class Preferences(QDialog):
         self.setup_profile()
         self.setup_global()
         self.setup_configurable_answer_keys()
+        self.setup_gmat_adaptive()
         self.show()
 
     def setup_configurable_answer_keys(self):
@@ -93,6 +94,28 @@ class Preferences(QDialog):
                 functools.partial(self.mw.pm.set_answer_key, ease),
             )
             line_edit.setPlaceholderText(tr.preferences_shortcut_placeholder())
+
+    def setup_gmat_adaptive(self) -> None:
+        """GMAT fork: expose the computer-adaptive difficulty (AI) scheduler
+        toggle in the Scheduler group. It is backed by the ``gmatAdaptiveEnabled``
+        collection config that the Rust queue builder reads
+        (``BoolKey::GmatAdaptiveEnabled``); the change takes effect the next time
+        a deck's queue is built. Written immediately on toggle, matching how the
+        answer-key fields above persist as you edit them."""
+        cb = QCheckBox("Adaptive difficulty (AI)")
+        cb.setToolTip(
+            "When on, the review queue is reordered to serve questions matched "
+            "to your estimated ability (Rasch/1PL): answer well and the next "
+            "questions get harder, struggle and they get easier. Turn off for "
+            "the standard scheduler. Takes effect next time you enter a deck."
+        )
+        cb.setChecked(bool(self.mw.col.get_config("gmatAdaptiveEnabled", False)))
+        qconnect(cb.toggled, self._on_gmat_adaptive_toggled)
+        self.gmat_adaptive = cb
+        self.form.verticalLayout_17.addWidget(cb)
+
+    def _on_gmat_adaptive_toggled(self, checked: bool) -> None:
+        self.mw.col.set_config("gmatAdaptiveEnabled", checked)
 
     def accept(self) -> None:
         self.accept_with_callback()
