@@ -7,6 +7,7 @@ use crate::error::Result;
 use crate::prelude::*;
 
 mod adaptive;
+mod auto_grade;
 pub mod answering;
 pub mod bury_and_suspend;
 pub(crate) mod congrats;
