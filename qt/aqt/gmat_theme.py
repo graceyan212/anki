@@ -357,11 +357,15 @@ def _transform_card(text: str) -> str | None:
 
 
 def _on_card_will_show(text: str, card: object, kind: str) -> str:
-    """FILTER: reshape GMAT MC cards into the Bauhaus layout. Defensive: any
-    non-MC card or error passes the original text through unchanged."""
+    """FILTER: reshape GMAT MC cards into the Bauhaus layout. The card CSS is
+    prepended *inline* so the styling always travels with the card — the
+    ``webview_will_set_content`` head injection doesn't reliably reach the
+    reviewer's card view (styles get set before our hook, and cards re-render via
+    JS without re-firing it). Defensive: any non-MC card or error passes the
+    original text through unchanged."""
     try:
         transformed = _transform_card(text)
-        return transformed if transformed is not None else text
+        return _CARD_CSS + transformed if transformed is not None else text
     except Exception:  # pragma: no cover - a theming error must not hide a card
         return text
 
