@@ -6,21 +6,26 @@
 When ``gmatAutoGradeEnabled`` is on, the A-E choices in the question view become
 clickable. Tapping one asks the student how sure they are (Guessing / Fairly
 sure / Confident), then the shared Rust engine (``col._backend.grade_answer`` ->
-the ``GradeAnswer`` RPC, the SAME code the phone uses) turns correctness × that
+the ``GradeAnswer`` RPC, the SAME code the phone uses) turns correctness ×
 confidence into Again/Hard/Good/Easy — calibration, not time. It then reveals the
 answer and records the rating. Off by default; the manual buttons are untouched
 and always available as an override.
 
 Wiring: ``init()`` appends two gui_hooks. Registered from ``aqt.main`` AFTER
-``gmat_theme`` so the choices are already the Bauhaus ``.gmat-card`` layout when
-we add the click handlers.
+``gmat_theme`` so the choices are already the Bauhaus ``.gmat-card`` layout.
+
+NOTE: this module is imported *during* ``aqt`` package initialisation (via
+``aqt.main``), so it must NOT ``from aqt import mw`` at module load — ``aqt.mw``
+does not exist yet and that would be a circular import. We ``import aqt`` and
+reference ``aqt.mw`` lazily inside functions (same pattern as ``gmat_theme``).
 """
 
 from __future__ import annotations
 
 import re
 
-from aqt import gui_hooks, mw
+import aqt
+from aqt import gui_hooks
 
 # Correct-answer letter in the rendered answer HTML ("Answer: X").
 _ANSWER_LETTER_RE = re.compile(r"Answer:\s*(?:</b>)?\s*([A-E])", re.I)
@@ -29,7 +34,7 @@ _CHOICE_DIV_RE = re.compile(r'<div class="choice"><div class="marker">([A-E])</d
 
 
 def _enabled() -> bool:
-    return bool(mw and mw.col and mw.col.get_config("gmatAutoGradeEnabled", False))
+    return bool(aqt.mw and aqt.mw.col and aqt.mw.col.get_config("gmatAutoGradeEnabled", False))
 
 
 def _inject_choice_taps(html: str) -> str:
@@ -57,7 +62,7 @@ def _ask_confidence() -> int | None:
     or None if dismissed."""
     from aqt.qt import QMessageBox
 
-    box = QMessageBox(mw)
+    box = QMessageBox(aqt.mw)
     box.setWindowTitle("How sure are you?")
     box.setText("How confident are you in this answer?")
     guessing = box.addButton("Guessing", QMessageBox.ButtonRole.NoRole)
@@ -75,14 +80,14 @@ def _ask_confidence() -> int | None:
 
 
 def _grade_and_answer(letter: str, confidence: int) -> None:
-    reviewer = mw.reviewer
+    reviewer = aqt.mw.reviewer
     card = reviewer.card if reviewer else None
     if card is None:
         return
     match = _ANSWER_LETTER_RE.search(card.answer())
     correct = bool(match and match.group(1).upper() == letter)
     try:
-        ease = mw.col._backend.grade_answer(correct=correct, confidence=confidence).ease
+        ease = aqt.mw.col._backend.grade_answer(correct=correct, confidence=confidence).ease
     except Exception:
         ease = 3  # never block a review on a grading hiccup
     if ease not in (1, 2, 3, 4):
