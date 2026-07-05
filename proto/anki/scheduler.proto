@@ -560,14 +560,14 @@ message GmatScores {
 }
 
 message GradeAnswerRequest {
-  int64 card_id = 1;
-  bool correct = 2;
-  uint32 elapsed_ms = 3;
-  // The item's intended time; 0 = unknown (engine uses a default).
-  uint32 target_seconds = 4;
+  bool correct = 1;
+  // Student's self-reported confidence: 0 = guessing, 1 = fairly sure, 2 = confident.
+  uint32 confidence = 2;
 }
 
 message GradeAnswerResponse {
   // Anki ease button: 1=Again, 2=Hard, 3=Good, 4=Easy.
   uint32 ease = 1;
+  // True when the answer was wrong but the student was not guessing.
+  bool overconfident = 2;
 }

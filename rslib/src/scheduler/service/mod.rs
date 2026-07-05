@@ -402,7 +402,15 @@ impl crate::services::SchedulerService for Collection {
         &mut self,
         input: scheduler::GradeAnswerRequest,
     ) -> Result<scheduler::GradeAnswerResponse> {
-        self.grade_tapped_answer(input)
+        use crate::scheduler::auto_grade::grade_answer;
+        use crate::scheduler::auto_grade::is_overconfident_miss;
+        use crate::scheduler::auto_grade::rating_to_ease;
+        use crate::scheduler::auto_grade::Confidence;
+        let confidence = Confidence::from_u32(input.confidence);
+        Ok(scheduler::GradeAnswerResponse {
+            ease: rating_to_ease(grade_answer(input.correct, confidence)) as u32,
+            overconfident: is_overconfident_miss(input.correct, confidence),
+        })
     }
 }
 
