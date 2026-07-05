@@ -28,9 +28,13 @@ use fsrs::FSRS5_DEFAULT_DECAY;
 
 use anki_proto::scheduler::GetGmatScoresRequest;
 use anki_proto::scheduler::GmatScores;
+use anki_proto::scheduler::GradeAnswerRequest;
+use anki_proto::scheduler::GradeAnswerResponse;
 use anki_proto::scheduler::ScoreValue;
 
 use crate::prelude::*;
+use crate::scheduler::auto_grade::grade_answer;
+use crate::scheduler::auto_grade::rating_to_ease;
 use crate::storage::topic_stats::TopicCardRow;
 
 // --- Give-up thresholds (spec: "set a clear line and state it"). ---
@@ -93,6 +97,33 @@ impl Collection {
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
         Ok(compute_scores(&rows, now_ms))
+    }
+
+    /// Auto-grade a tapped multiple-choice answer into an Anki ease (1–4).
+    ///
+    /// Wrong → Again(1); correct → Hard/Good/Easy by response time vs a
+    /// difficulty-adjusted target, using the card's difficulty and the learner's
+    /// current Rasch ability θ (0 until enough answers exist). Read-only here;
+    /// the caller applies the returned ease through the normal answer path.
+    pub fn grade_tapped_answer(&mut self, req: GradeAnswerRequest) -> Result<GradeAnswerResponse> {
+        let cid = CardId(req.card_id);
+        let card = self.storage.get_card(cid)?.or_not_found(cid)?;
+        let note = self
+            .storage
+            .get_note(card.note_id)?
+            .or_not_found(card.note_id)?;
+        let b = difficulty_logit(&note.tags.join(" "));
+        let theta = PerfEstimate::from_rows(&self.storage.all_topic_card_rows()?).theta;
+        let rating = grade_answer(
+            req.correct,
+            req.elapsed_ms as f64 / 1000.0,
+            req.target_seconds as f64,
+            b,
+            theta,
+        );
+        Ok(GradeAnswerResponse {
+            ease: rating_to_ease(rating) as u32,
+        })
     }
 }
 

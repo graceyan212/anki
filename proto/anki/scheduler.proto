@@ -72,6 +72,9 @@ service SchedulerService {
   // GMAT fork (T3): read-only three-score summary (memory / performance /
   // readiness), each with a range + per-score give-up rule.
   rpc GetGmatScores(GetGmatScoresRequest) returns (GmatScores);
+  // GMAT fork: auto-grade a tapped multiple-choice answer into an ease (1-4)
+  // from offline signals (correctness, response time, difficulty vs ability).
+  rpc GradeAnswer(GradeAnswerRequest) returns (GradeAnswerResponse);
 }
 
 // Implicitly includes any of the above methods that are not listed in the
@@ -554,4 +557,17 @@ message GmatScores {
   ScoreValue memory = 1;
   ScoreValue performance = 2;
   ScoreValue readiness = 3;
+}
+
+message GradeAnswerRequest {
+  int64 card_id = 1;
+  bool correct = 2;
+  uint32 elapsed_ms = 3;
+  // The item's intended time; 0 = unknown (engine uses a default).
+  uint32 target_seconds = 4;
+}
+
+message GradeAnswerResponse {
+  // Anki ease button: 1=Again, 2=Hard, 3=Good, 4=Easy.
+  uint32 ease = 1;
 }

@@ -397,6 +397,13 @@ impl crate::services::SchedulerService for Collection {
     fn get_gmat_scores(&mut self, input: GetGmatScoresRequest) -> Result<GmatScores> {
         self.get_gmat_scores(input)
     }
+
+    fn grade_answer(
+        &mut self,
+        input: scheduler::GradeAnswerRequest,
+    ) -> Result<scheduler::GradeAnswerResponse> {
+        self.grade_tapped_answer(input)
+    }
 }
 
 impl crate::services::BackendSchedulerService for Backend {
