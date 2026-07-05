@@ -131,7 +131,7 @@ class Preferences(QDialog):
             "answered, and the item's difficulty vs your ability. The manual "
             "buttons remain available to override."
         )
-        cb.setChecked(bool(self.mw.col.get_config("gmatAutoGradeEnabled", False)))
+        cb.setChecked(bool(self.mw.col.get_config("gmatAutoGradeEnabled", True)))
         qconnect(cb.toggled, self._on_gmat_autograde_toggled)
         self.gmat_autograde = cb
         self.form.verticalLayout_17.addWidget(cb)

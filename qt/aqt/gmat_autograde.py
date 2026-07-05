@@ -8,8 +8,8 @@ clickable. Tapping one asks the student how sure they are (Guessing / Fairly
 sure / Confident), then the shared Rust engine (``col._backend.grade_answer`` ->
 the ``GradeAnswer`` RPC, the SAME code the phone uses) turns correctness ×
 confidence into Again/Hard/Good/Easy — calibration, not time. It then reveals the
-answer and records the rating. Off by default; the manual buttons are untouched
-and always available as an override.
+answer and records the rating. On by default; the manual buttons are untouched
+and always available as an override (toggle in Preferences).
 
 Wiring: ``init()`` appends two gui_hooks. Registered from ``aqt.main`` AFTER
 ``gmat_theme`` so the choices are already the Bauhaus ``.gmat-card`` layout.
@@ -34,7 +34,7 @@ _CHOICE_DIV_RE = re.compile(r'<div class="choice"><div class="marker">([A-E])</d
 
 
 def _enabled() -> bool:
-    return bool(aqt.mw and aqt.mw.col and aqt.mw.col.get_config("gmatAutoGradeEnabled", False))
+    return bool(aqt.mw and aqt.mw.col and aqt.mw.col.get_config("gmatAutoGradeEnabled", True))
 
 
 def _inject_choice_taps(html: str) -> str:
