@@ -20,6 +20,7 @@ import anki
 import anki.sound
 import aqt
 import aqt.forms
+import aqt.gmat_autograde
 import aqt.gmat_dashboard
 import aqt.gmat_theme
 import aqt.progress
@@ -252,6 +253,7 @@ class AnkiQt(QMainWindow):
         gui_hooks.reviewer_did_init(self.reviewer)
         aqt.gmat_dashboard.init()  # GMAT readiness panel (track T3)
         aqt.gmat_theme.init()  # app-wide Bauhaus theme layer (track T3)
+        aqt.gmat_autograde.init()  # auto-grade tapped MC answers (off by default)
 
     def setupProfileAfterWebviewsLoaded(self) -> None:
         for w in (self.web, self.bottomWeb):

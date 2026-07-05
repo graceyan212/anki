@@ -67,6 +67,7 @@ class Preferences(QDialog):
         self.setup_global()
         self.setup_configurable_answer_keys()
         self.setup_gmat_adaptive()
+        self.setup_gmat_autograde()
         self.show()
 
     def setup_configurable_answer_keys(self):
@@ -116,6 +117,27 @@ class Preferences(QDialog):
 
     def _on_gmat_adaptive_toggled(self, checked: bool) -> None:
         self.mw.col.set_config("gmatAdaptiveEnabled", checked)
+
+    def setup_gmat_autograde(self) -> None:
+        """GMAT fork: toggle auto-grading a tapped multiple-choice answer. When
+        on, clicking a choice in the reviewer asks the shared engine to set
+        Again/Hard/Good/Easy (from correctness, response time, and difficulty vs
+        ability) and records it — the manual buttons still work as an override.
+        Backed by the ``gmatAutoGradeEnabled`` collection config; off by default."""
+        cb = QCheckBox("Auto-grade answers (AI)")
+        cb.setToolTip(
+            "When on, tap a choice in the reviewer and the shared engine decides "
+            "Again/Hard/Good/Easy from whether you were right, how fast you "
+            "answered, and the item's difficulty vs your ability. The manual "
+            "buttons remain available to override."
+        )
+        cb.setChecked(bool(self.mw.col.get_config("gmatAutoGradeEnabled", False)))
+        qconnect(cb.toggled, self._on_gmat_autograde_toggled)
+        self.gmat_autograde = cb
+        self.form.verticalLayout_17.addWidget(cb)
+
+    def _on_gmat_autograde_toggled(self, checked: bool) -> None:
+        self.mw.col.set_config("gmatAutoGradeEnabled", checked)
 
     def accept(self) -> None:
         self.accept_with_callback()
