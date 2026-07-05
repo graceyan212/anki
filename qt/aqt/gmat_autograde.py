@@ -1,17 +1,17 @@
 # Copyright: Ankitects Pty Ltd and contributors
 # License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 
-"""GMAT fork: auto-grade a tapped multiple-choice answer on the desktop reviewer.
+"""GMAT fork: confidence-based auto-grading on the desktop reviewer.
 
 When ``gmatAutoGradeEnabled`` is on, the A-E choices in the question view become
-clickable. Tapping one asks the shared Rust engine
-(``col._backend.grade_answer`` -> the ``GradeAnswer`` RPC, the SAME code the
-phone uses) to decide Again/Hard/Good/Easy from correctness, response time, and
-the item's difficulty vs the learner's ability, then reveals the answer and
-records that rating. Off by default; the manual Again/Hard/Good/Easy buttons are
-untouched and always available.
+clickable. Tapping one asks the student how sure they are (Guessing / Fairly
+sure / Confident), then the shared Rust engine (``col._backend.grade_answer`` ->
+the ``GradeAnswer`` RPC, the SAME code the phone uses) turns correctness × that
+confidence into Again/Hard/Good/Easy — calibration, not time. It then reveals the
+answer and records the rating. Off by default; the manual buttons are untouched
+and always available as an override.
 
-Wiring: ``init()`` appends three gui_hooks. Registered from ``aqt.main`` AFTER
+Wiring: ``init()`` appends two gui_hooks. Registered from ``aqt.main`` AFTER
 ``gmat_theme`` so the choices are already the Bauhaus ``.gmat-card`` layout when
 we add the click handlers.
 """
@@ -19,12 +19,8 @@ we add the click handlers.
 from __future__ import annotations
 
 import re
-import time
 
 from aqt import gui_hooks, mw
-
-# Set when a question is shown, to measure response time.
-_question_shown_at: float = 0.0
 
 # Correct-answer letter in the rendered answer HTML ("Answer: X").
 _ANSWER_LETTER_RE = re.compile(r"Answer:\s*(?:</b>)?\s*([A-E])", re.I)
@@ -36,16 +32,11 @@ def _enabled() -> bool:
     return bool(mw and mw.col and mw.col.get_config("gmatAutoGradeEnabled", False))
 
 
-def _on_show_question(card: object) -> None:
-    global _question_shown_at
-    _question_shown_at = time.time()
-
-
 def _inject_choice_taps(html: str) -> str:
     """Make each choice row clickable, reporting its letter via pycmd."""
     return _CHOICE_DIV_RE.sub(
         r'<div class="choice" style="cursor:pointer" '
-        r"onclick=\"pycmd('gmatgrade:\1')\"><div class=\"marker\">\1</div>",
+        r"onclick=\"pycmd('gmatchoice:\1')\"><div class=\"marker\">\1</div>",
         html,
     )
 
@@ -61,21 +52,37 @@ def _on_card_will_show(text: str, card: object, kind: str) -> str:
     return text
 
 
-def _grade_and_answer(letter: str) -> None:
+def _ask_confidence() -> int | None:
+    """Modal confidence prompt. Returns 0=guessing, 1=fairly sure, 2=confident,
+    or None if dismissed."""
+    from aqt.qt import QMessageBox
+
+    box = QMessageBox(mw)
+    box.setWindowTitle("How sure are you?")
+    box.setText("How confident are you in this answer?")
+    guessing = box.addButton("Guessing", QMessageBox.ButtonRole.NoRole)
+    fairly = box.addButton("Fairly sure", QMessageBox.ButtonRole.NoRole)
+    confident = box.addButton("Confident", QMessageBox.ButtonRole.YesRole)
+    box.exec()
+    clicked = box.clickedButton()
+    if clicked is confident:
+        return 2
+    if clicked is fairly:
+        return 1
+    if clicked is guessing:
+        return 0
+    return None
+
+
+def _grade_and_answer(letter: str, confidence: int) -> None:
     reviewer = mw.reviewer
     card = reviewer.card if reviewer else None
     if card is None:
         return
     match = _ANSWER_LETTER_RE.search(card.answer())
     correct = bool(match and match.group(1).upper() == letter)
-    elapsed_ms = int(max(0.0, time.time() - _question_shown_at) * 1000)
     try:
-        ease = mw.col._backend.grade_answer(
-            card_id=card.id,
-            correct=correct,
-            elapsed_ms=elapsed_ms,
-            target_seconds=0,
-        )
+        ease = mw.col._backend.grade_answer(correct=correct, confidence=confidence).ease
     except Exception:
         ease = 3  # never block a review on a grading hiccup
     if ease not in (1, 2, 3, 4):
@@ -87,19 +94,20 @@ def _grade_and_answer(letter: str) -> None:
 
 
 def _on_js_message(handled: tuple[bool, object], message: str, context: object) -> tuple[bool, object]:
-    """Handle the pycmd from a tapped choice."""
-    if not message.startswith("gmatgrade:"):
+    """Handle the pycmd from a tapped choice: ask confidence, then grade."""
+    if not message.startswith("gmatchoice:"):
         return handled
     try:
         letter = message.split(":", 1)[1].strip().upper()
         if letter and _enabled():
-            _grade_and_answer(letter)
+            confidence = _ask_confidence()
+            if confidence is not None:
+                _grade_and_answer(letter, confidence)
     except Exception:  # pragma: no cover
         pass
     return (True, None)
 
 
 def init() -> None:
-    gui_hooks.reviewer_did_show_question.append(_on_show_question)
     gui_hooks.card_will_show.append(_on_card_will_show)
     gui_hooks.webview_did_receive_js_message.append(_on_js_message)
