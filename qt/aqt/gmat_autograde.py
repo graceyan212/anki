@@ -38,12 +38,21 @@ def _enabled() -> bool:
 
 
 def _inject_choice_taps(html: str) -> str:
-    """Make each choice row clickable, reporting its letter via pycmd."""
-    return _CHOICE_DIV_RE.sub(
-        r'<div class="choice" style="cursor:pointer" '
-        r"onclick=\"pycmd('gmatchoice:\1')\"><div class=\"marker\">\1</div>",
-        html,
-    )
+    """Make each choice row clickable, reporting its letter via pycmd.
+
+    A function replacement is used so the emitted HTML carries *real* double
+    quotes: a string/backreference replacement with ``\\"`` mangles the quoting
+    (the backslashes land in the DOM and the onclick attribute never parses)."""
+
+    def _clickable(m: "re.Match[str]") -> str:
+        letter = m.group(1)
+        return (
+            f'<div class="choice" style="cursor:pointer" '
+            f"onclick=\"pycmd('gmatchoice:{letter}')\">"
+            f'<div class="marker">{letter}</div>'
+        )
+
+    return _CHOICE_DIV_RE.sub(_clickable, html)
 
 
 def _on_card_will_show(text: str, card: object, kind: str) -> str:
