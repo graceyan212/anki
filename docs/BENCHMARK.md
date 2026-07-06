@@ -53,13 +53,13 @@ this.
 Each action is measured over **N = 30 iterations** (after one warm-up) on the
 same 50k deck:
 
-| Action | What runs |
-|---|---|
+| Action                                           | What runs                                                                                                                                                                                                                                                                                          |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **review queue build (points-at-stake reorder)** | Forces a fresh study-queue build (switching the current deck invalidates the cached queue), so `build_queues` → `gather_cards` → `points_at_stake_weights` → `sort_review` all run over ~19k review cards. The cache-invalidation prep is untimed; only the GMAT-deck rebuild + fetch is measured. |
-| **`get_gmat_scores`** | The three-score summary RPC (T3): memory / performance / readiness, each with range + give-up rule. |
-| **`get_topic_mastery_stats`** | Per-topic mastery aggregate RPC (T2), `topic_depth=2`. |
-| **`get_topic_breakdown`** | Per-topic × difficulty-band RPC (T4), `topic_depth=3` — exactly what the desktop dashboard calls. |
-| **next-card fetch + answer** | `get_queued_cards` for the next card, then `answer_card` (Good). |
+| **`get_gmat_scores`**                            | The three-score summary RPC (T3): memory / performance / readiness, each with range + give-up rule.                                                                                                                                                                                                |
+| **`get_topic_mastery_stats`**                    | Per-topic mastery aggregate RPC (T2), `topic_depth=2`.                                                                                                                                                                                                                                             |
+| **`get_topic_breakdown`**                        | Per-topic × difficulty-band RPC (T4), `topic_depth=3` — exactly what the desktop dashboard calls.                                                                                                                                                                                                  |
+| **next-card fetch + answer**                     | `get_queued_cards` for the next card, then `answer_card` (Good).                                                                                                                                                                                                                                   |
 
 ## Recorded results
 
@@ -95,11 +95,11 @@ RPCs — `get_gmat_scores` **and** `get_topic_breakdown(topic_depth=3)` (see
 `qt/aqt/gmat_dashboard.py`) — so the dashboard load/refresh figure below is the
 **sum of those two p95s** (the honest end-to-end engine cost of one refresh).
 
-| Section 10 action | Engine work measured | Target (p95) | Measured p95 | Result |
-|---|---|---|---|---|
-| **next-card** | next-card fetch + answer | **< 100 ms** | **1.58 ms** | ✅ PASS (~63× headroom) |
-| **dashboard load** | `get_gmat_scores` + `get_topic_breakdown` | **< 1 s** | **145.31 + 279.89 = 425.20 ms** | ✅ PASS (~2.4× headroom) |
-| **dashboard refresh** | `get_gmat_scores` + `get_topic_breakdown` | **< 500 ms** | **145.31 + 279.89 = 425.20 ms** | ✅ PASS |
+| Section 10 action     | Engine work measured                      | Target (p95) | Measured p95                    | Result                   |
+| --------------------- | ----------------------------------------- | ------------ | ------------------------------- | ------------------------ |
+| **next-card**         | next-card fetch + answer                  | **< 100 ms** | **1.58 ms**                     | ✅ PASS (~63× headroom)  |
+| **dashboard load**    | `get_gmat_scores` + `get_topic_breakdown` | **< 1 s**    | **145.31 + 279.89 = 425.20 ms** | ✅ PASS (~2.4× headroom) |
+| **dashboard refresh** | `get_gmat_scores` + `get_topic_breakdown` | **< 500 ms** | **145.31 + 279.89 = 425.20 ms** | ✅ PASS                  |
 
 Worst case (single slowest of 30) also stays inside budget: next-card 2.49 ms
 (< 100 ms), and the dashboard's two RPCs sum to 148.87 + 363.48 = 512.35 ms

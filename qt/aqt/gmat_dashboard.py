@@ -650,12 +650,12 @@ class GmatReadinessDialog(QDialog):
         for band_label, color, band in bands:
             total = int(getattr(band, "total", 0)) if band is not None else 0
             attempted = int(getattr(band, "attempted", 0)) if band is not None else 0
-            accuracy = float(getattr(band, "accuracy", 0.0)) if band is not None else 0.0
+            accuracy = (
+                float(getattr(band, "accuracy", 0.0)) if band is not None else 0.0
+            )
             if attempted == 0:
                 detail = (
-                    f"not attempted &#183; {total} cards"
-                    if total > 0
-                    else "no cards"
+                    f"not attempted &#183; {total} cards" if total > 0 else "no cards"
                 )
                 detail_color = BAUHAUS_MUTED
             else:
