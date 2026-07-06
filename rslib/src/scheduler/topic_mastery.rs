@@ -16,23 +16,28 @@
 //! "mastered", the mastery fraction, and the average recall from the revlog.
 //!
 //! This is read-only: it does a single plain storage read, so it records no new
-//! undo step and leaves the existing undo history intact (a stats query must not
-//! cost the student their pending undo). The heavy lifting is a single aggregate
-//! SQL query (`storage::topic_stats`); here we only parse tags and fold the rows.
-//! The points-at-stake reorder it also powers mutates no cards, so that path
-//! leaves the undo history untouched too.
+//! undo step and leaves the existing undo history intact (a stats query must
+//! not cost the student their pending undo). The heavy lifting is a single
+//! aggregate SQL query (`storage::topic_stats`); here we only parse tags and
+//! fold the rows. The points-at-stake reorder it also powers mutates no cards,
+//! so that path leaves the undo history untouched too.
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
+use anki_proto::scheduler::DifficultyBand;
+use anki_proto::scheduler::GetTopicBreakdownRequest;
+use anki_proto::scheduler::GetTopicBreakdownResponse;
 use anki_proto::scheduler::GetTopicMasteryStatsRequest;
 use anki_proto::scheduler::GetTopicMasteryStatsResponse;
+use anki_proto::scheduler::TopicDifficultyBreakdown;
 use anki_proto::scheduler::TopicMasteryStat;
 use fsrs::current_retrievability;
 use fsrs::MemoryState;
 use fsrs::FSRS5_DEFAULT_DECAY;
 
 use crate::prelude::*;
+use crate::scheduler::adaptive::note_difficulty;
 use crate::storage::topic_stats::TopicCardRow;
 
 /// Default interval (days) at/above which a card is "mastered" — the SM-2
@@ -51,6 +56,78 @@ struct Accumulator {
     mastered_cards: u32,
     passed_reviews: u64,
     total_reviews: u64,
+}
+
+/// The three difficulty bands a card's resolved 0–100 difficulty falls into.
+/// Boundaries match the T4 contract: 0–33 easy, 34–66 medium, 67–100 hard —
+/// splitting the coarse levels (20/50/80) cleanly and putting the band edges
+/// halfway between them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Band {
+    Easy,
+    Medium,
+    Hard,
+}
+
+impl Band {
+    /// Band a resolved 0–100 difficulty. Values are already clamped to [0,100]
+    /// by `note_difficulty`; anything ≤33 is easy, 34–66 medium, ≥67 hard.
+    fn from_difficulty(difficulty: f32) -> Band {
+        if difficulty <= 33.0 {
+            Band::Easy
+        } else if difficulty <= 66.0 {
+            Band::Medium
+        } else {
+            Band::Hard
+        }
+    }
+}
+
+/// Running per-band totals while folding rows. `correct`/`reviews` accumulate
+/// revlog counts (correct = passes, i.e. ease > 1); accuracy is derived at the
+/// end as `correct / reviews`.
+#[derive(Default)]
+struct BandAcc {
+    total: u32,
+    attempted: u32,
+    correct: u32,
+    reviews: u32,
+}
+
+impl BandAcc {
+    fn into_proto(self) -> DifficultyBand {
+        let accuracy = if self.reviews > 0 {
+            self.correct as f64 / self.reviews as f64
+        } else {
+            0.0
+        };
+        DifficultyBand {
+            total: self.total,
+            attempted: self.attempted,
+            correct: self.correct,
+            accuracy,
+        }
+    }
+}
+
+/// Running totals for a single topic while building the per-difficulty
+/// breakdown: the three bands plus a distinct-reviewed-card count.
+#[derive(Default)]
+struct TopicBreakdownAcc {
+    reviewed_cards: u32,
+    easy: BandAcc,
+    medium: BandAcc,
+    hard: BandAcc,
+}
+
+impl TopicBreakdownAcc {
+    fn band_mut(&mut self, band: Band) -> &mut BandAcc {
+        match band {
+            Band::Easy => &mut self.easy,
+            Band::Medium => &mut self.medium,
+            Band::Hard => &mut self.hard,
+        }
+    }
 }
 
 impl Collection {
@@ -119,6 +196,72 @@ impl Collection {
             .collect();
 
         Ok(GetTopicMasteryStatsResponse { topics })
+    }
+
+    /// Read-only per-topic × per-difficulty-band breakdown. See module docs and
+    /// [`Band`]. Bands each card by its resolved 0–100 difficulty
+    /// (`note_difficulty`, shared with the adaptive selector) and reports, per
+    /// band, how many cards there are, how many have been attempted (≥1 revlog
+    /// entry), how many reviews were correct (ease > 1), and the resulting
+    /// accuracy. `reviewed_cards` flags whether the student has hit the topic
+    /// at all (distinct cards with ≥1 review, across every band).
+    ///
+    /// Same single-aggregate-read discipline as `get_topic_mastery_stats`: it
+    /// runs one `all_topic_card_rows` pass, records no undo step, and leaves
+    /// the existing undo history intact (a stats query must not cost the
+    /// student their pending undo).
+    pub fn get_topic_breakdown(
+        &mut self,
+        req: GetTopicBreakdownRequest,
+    ) -> Result<GetTopicBreakdownResponse> {
+        let depth = if req.topic_depth == 0 {
+            DEFAULT_TOPIC_DEPTH
+        } else {
+            req.topic_depth
+        } as usize;
+
+        // Single read-only aggregate pass; see method docs (mirrors
+        // get_topic_mastery_stats — no undo step, undo history untouched).
+        let rows = self.storage.all_topic_card_rows()?;
+
+        let mut groups: BTreeMap<String, TopicBreakdownAcc> = BTreeMap::new();
+        for row in &rows {
+            let Some(topic) = topic_prefix(&row.tags, depth) else {
+                continue;
+            };
+            // A card with no difficulty tag cannot be banded, so it does not
+            // belong in any easy/medium/hard bucket. It is intentionally
+            // excluded (the breakdown is strictly per-band).
+            let Some(difficulty) = note_difficulty(&row.tags) else {
+                continue;
+            };
+            let acc = groups.entry(topic).or_default();
+            let reviewed = row.total > 0;
+            if reviewed {
+                // Distinct reviewed card in this topic (across all bands).
+                acc.reviewed_cards += 1;
+            }
+            let band = acc.band_mut(Band::from_difficulty(difficulty));
+            band.total += 1;
+            if reviewed {
+                band.attempted += 1;
+                band.correct += row.passed;
+                band.reviews += row.total;
+            }
+        }
+
+        let topics = groups
+            .into_iter()
+            .map(|(topic, acc)| TopicDifficultyBreakdown {
+                topic,
+                reviewed_cards: acc.reviewed_cards,
+                easy: Some(acc.easy.into_proto()),
+                medium: Some(acc.medium.into_proto()),
+                hard: Some(acc.hard.into_proto()),
+            })
+            .collect();
+
+        Ok(GetTopicBreakdownResponse { topics })
     }
 
     /// Compute a "points-at-stake" weight per note for the in-memory review
@@ -598,6 +741,207 @@ mod test {
         );
         col.undo().unwrap();
         assert_eq!(col.storage.get_card(card.id).unwrap().unwrap().interval, 10);
+    }
+
+    /// Record genuine revlog entries for a note's card so the aggregate query
+    /// sees `passed`/`total`. A "pass"/"correct" is ease > 1 (Hard/Good/Easy),
+    /// a miss is ease 1 (Again); both count toward `total`. Mirrors the helper
+    /// in `adaptive.rs` — a plain, non-undoable revlog write.
+    fn record_reviews(col: &mut Collection, nid: NoteId, correct: u32, wrong: u32) {
+        use crate::revlog::RevlogEntry;
+        use crate::revlog::RevlogReviewKind;
+        let card = col.storage.get_card_by_ordinal(nid, 0).unwrap().unwrap();
+        for i in 0..(correct + wrong) {
+            // ease 3 (Good) is a pass; ease 1 (Again) is a miss.
+            let ease = if i < correct { 3 } else { 1 };
+            let entry = RevlogEntry {
+                id: crate::revlog::RevlogId(TimestampMillis::now().0 + i as i64),
+                cid: card.id,
+                usn: Usn(-1),
+                button_chosen: ease,
+                interval: 10,
+                last_interval: 5,
+                ease_factor: 2500,
+                taken_millis: 1000,
+                review_kind: RevlogReviewKind::Review,
+            };
+            col.storage.add_revlog_entry(&entry, true).unwrap();
+        }
+    }
+
+    #[test]
+    fn breakdown_bands_by_difficulty_with_revlog_counts() {
+        let mut col = Collection::new();
+        // Quant::Arithmetic with a card in each band, plus revlog answers.
+        // Easy (aidiff::10): 3 correct, 1 wrong -> attempted, accuracy 0.75.
+        let easy = add_review_card(&mut col, &["Quant::Arithmetic::Percents", "aidiff::10"], 5);
+        record_reviews(&mut col, easy, 3, 1);
+        // Medium (coarse difficulty::medium -> 50): 1 correct, 1 wrong.
+        let medium = add_review_card(
+            &mut col,
+            &["Quant::Arithmetic::FractionsDecimals", "difficulty::medium"],
+            5,
+        );
+        record_reviews(&mut col, medium, 1, 1);
+        // Hard (aidiff::90): all correct.
+        let hard = add_review_card(&mut col, &["Quant::Arithmetic::Roots", "aidiff::90"], 5);
+        record_reviews(&mut col, hard, 4, 0);
+        // A second hard card with NO reviews -> counts in band total but not
+        // attempted, and does not raise reviewed_cards.
+        add_review_card(&mut col, &["Quant::Arithmetic::Roots", "aidiff::80"], 5);
+
+        let resp = col
+            .get_topic_breakdown(GetTopicBreakdownRequest { topic_depth: 2 })
+            .unwrap();
+
+        assert_eq!(resp.topics.len(), 1, "topics: {:?}", resp.topics);
+        let t = &resp.topics[0];
+        assert_eq!(t.topic, "Quant::Arithmetic");
+        // 3 distinct reviewed cards (easy, medium, one hard); the second hard
+        // card was never reviewed.
+        assert_eq!(t.reviewed_cards, 3);
+
+        let e = t.easy.as_ref().unwrap();
+        assert_eq!(e.total, 1);
+        assert_eq!(e.attempted, 1);
+        assert_eq!(e.correct, 3);
+        assert!(
+            (e.accuracy - 0.75).abs() < 1e-9,
+            "easy accuracy {}",
+            e.accuracy
+        );
+
+        let m = t.medium.as_ref().unwrap();
+        assert_eq!(m.total, 1);
+        assert_eq!(m.attempted, 1);
+        assert_eq!(m.correct, 1);
+        assert!(
+            (m.accuracy - 0.5).abs() < 1e-9,
+            "medium accuracy {}",
+            m.accuracy
+        );
+
+        let h = t.hard.as_ref().unwrap();
+        assert_eq!(h.total, 2, "two hard cards (aidiff 90 and 80)");
+        assert_eq!(h.attempted, 1, "only the reviewed hard card is attempted");
+        assert_eq!(h.correct, 4);
+        assert!(
+            (h.accuracy - 1.0).abs() < 1e-9,
+            "hard accuracy {}",
+            h.accuracy
+        );
+    }
+
+    #[test]
+    fn breakdown_topic_with_zero_reviews() {
+        let mut col = Collection::new();
+        // Two banded cards, neither reviewed.
+        add_review_card(
+            &mut col,
+            &["Verbal::CriticalReasoning::Assumption", "aidiff::20"],
+            5,
+        );
+        add_review_card(
+            &mut col,
+            &["Verbal::CriticalReasoning::Weaken", "difficulty::hard"],
+            5,
+        );
+
+        let resp = col
+            .get_topic_breakdown(GetTopicBreakdownRequest { topic_depth: 2 })
+            .unwrap();
+
+        let t = resp
+            .topics
+            .iter()
+            .find(|t| t.topic == "Verbal::CriticalReasoning")
+            .expect("group present");
+        // No card reviewed -> the "have you hit this topic" flag stays 0.
+        assert_eq!(t.reviewed_cards, 0);
+        let e = t.easy.as_ref().unwrap();
+        let h = t.hard.as_ref().unwrap();
+        // Cards are still counted in their band totals...
+        assert_eq!(e.total, 1, "aidiff::20 lands in easy");
+        assert_eq!(h.total, 1, "difficulty::hard lands in hard");
+        // ...but nothing is attempted and accuracy stays 0.
+        for band in [
+            t.easy.as_ref().unwrap(),
+            t.medium.as_ref().unwrap(),
+            t.hard.as_ref().unwrap(),
+        ] {
+            assert_eq!(band.attempted, 0);
+            assert_eq!(band.correct, 0);
+            assert_eq!(band.accuracy, 0.0);
+        }
+    }
+
+    #[test]
+    fn breakdown_band_boundaries_and_untagged_difficulty_excluded() {
+        let mut col = Collection::new();
+        // Boundary cases: 33 -> easy, 34 -> medium, 66 -> medium, 67 -> hard.
+        add_review_card(&mut col, &["Quant::Algebra::A", "aidiff::33"], 5);
+        add_review_card(&mut col, &["Quant::Algebra::B", "aidiff::34"], 5);
+        add_review_card(&mut col, &["Quant::Algebra::C", "aidiff::66"], 5);
+        add_review_card(&mut col, &["Quant::Algebra::D", "aidiff::67"], 5);
+        // A card with a topic but NO difficulty tag must be excluded from every
+        // band (it cannot be banded).
+        add_review_card(&mut col, &["Quant::Algebra::E"], 5);
+
+        let resp = col
+            .get_topic_breakdown(GetTopicBreakdownRequest { topic_depth: 2 })
+            .unwrap();
+        let t = resp
+            .topics
+            .iter()
+            .find(|t| t.topic == "Quant::Algebra")
+            .expect("group present");
+        assert_eq!(t.easy.as_ref().unwrap().total, 1, "33 -> easy");
+        assert_eq!(t.medium.as_ref().unwrap().total, 2, "34 and 66 -> medium");
+        assert_eq!(t.hard.as_ref().unwrap().total, 1, "67 -> hard");
+        // The untagged-difficulty card contributes to no band (1+2+1 == 4).
+        let banded = t.easy.as_ref().unwrap().total
+            + t.medium.as_ref().unwrap().total
+            + t.hard.as_ref().unwrap().total;
+        assert_eq!(
+            banded, 4,
+            "the no-difficulty card is excluded from all bands"
+        );
+    }
+
+    #[test]
+    fn breakdown_query_leaves_undo_intact() {
+        let mut col = Collection::new();
+        let nid = add_review_card(&mut col, &["Quant::Arithmetic::Percents", "aidiff::50"], 10);
+        record_reviews(&mut col, nid, 2, 1);
+
+        // Establish a genuine undoable op to protect.
+        let card = col.storage.get_card_by_ordinal(nid, 0).unwrap().unwrap();
+        col.transact(Op::UpdateCard, |col| {
+            col.get_and_update_card(card.id, |c| {
+                c.interval = 42;
+                Ok(())
+            })
+            .unwrap();
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(col.can_undo(), Some(&Op::UpdateCard));
+
+        // The breakdown is a plain read: it must NOT clear the undo history.
+        let _ = col
+            .get_topic_breakdown(GetTopicBreakdownRequest::default())
+            .unwrap();
+        assert_eq!(
+            col.can_undo(),
+            Some(&Op::UpdateCard),
+            "the breakdown query (plain read) must not clear the undo history"
+        );
+        col.undo().unwrap();
+        assert_eq!(
+            col.storage.get_card(card.id).unwrap().unwrap().interval,
+            10,
+            "undo restored the pre-op interval after the breakdown query"
+        );
     }
 
     #[test]

@@ -7,8 +7,8 @@
 //! points-at-stake review reorder (see `scheduler::topic_mastery`). After
 //! estimating the student's ability **θ** from their answer history joined with
 //! each card's difficulty, cards whose difficulty is nearest θ float to the
-//! front *within* the existing weakest-topic ordering (θ is the tie-break, never
-//! the primary key). Gated behind `BoolKey::GmatAdaptiveEnabled`.
+//! front *within* the existing weakest-topic ordering (θ is the tie-break,
+//! never the primary key). Gated behind `BoolKey::GmatAdaptiveEnabled`.
 //!
 //! Like `points_at_stake_weights`, this is a PLAIN READ: it does a single
 //! aggregate storage read and never opens a transaction or writes a card, so it
@@ -16,8 +16,8 @@
 //! queue must not cost the student their pending undo).
 //!
 //! ## The model (Rasch / 1PL)
-//! - Each note's difficulty comes from a tag. We prefer `aidiff::NN`
-//!   (NN = 0–100, AI-rated); when absent we fall back to coarse
+//! - Each note's difficulty comes from a tag. We prefer `aidiff::NN` (NN =
+//!   0–100, AI-rated); when absent we fall back to coarse
 //!   `difficulty::easy|medium|hard` → 20 / 50 / 80. A note with neither tag has
 //!   no difficulty and is simply absent from the fit map (the sort treats a
 //!   missing note as an infinite distance, so it lands last within a weight
@@ -57,9 +57,9 @@ impl Collection {
     /// tie-break. See module docs.
     ///
     /// Plain read: this runs while a queue is being built (possibly inside an
-    /// outer transaction), so — exactly like `points_at_stake_weights` — it must
-    /// not open/commit its own transaction or clear study queues. A direct
-    /// storage read is correct and side-effect-free.
+    /// outer transaction), so — exactly like `points_at_stake_weights` — it
+    /// must not open/commit its own transaction or clear study queues. A
+    /// direct storage read is correct and side-effect-free.
     ///
     /// Returns a map of `fit_distance` for every note that has a difficulty
     /// (`aidiff` or coarse). Notes with no difficulty tag are absent from the
@@ -195,7 +195,11 @@ pub(crate) fn estimate_ability(obs: &[(f32, u32, u32)]) -> AbilityEstimate {
 
 /// A note's 0–100 difficulty: prefer the AI-rated `aidiff::NN` tag, else the
 /// coarse `difficulty::easy|medium|hard` level, else `None` (no difficulty).
-fn note_difficulty(tags: &str) -> Option<f32> {
+///
+/// Shared with the T4 per-topic difficulty breakdown
+/// (`scheduler::topic_mastery::get_topic_breakdown`) so the adaptive selector
+/// and the breakdown band a card by exactly the same resolved difficulty.
+pub(crate) fn note_difficulty(tags: &str) -> Option<f32> {
     parse_aidiff(tags).or_else(|| parse_coarse(tags))
 }
 
@@ -255,7 +259,10 @@ mod test {
         // aidiff::nan / non-finite must be rejected (a NaN would poison theta).
         assert_eq!(parse_aidiff("aidiff::nan"), None);
         assert_eq!(parse_aidiff("aidiff::inf"), None);
-        assert_eq!(note_difficulty("aidiff::nan difficulty::hard"), Some(COARSE_HARD));
+        assert_eq!(
+            note_difficulty("aidiff::nan difficulty::hard"),
+            Some(COARSE_HARD)
+        );
     }
 
     #[test]

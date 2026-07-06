@@ -15,6 +15,8 @@ use anki_proto::scheduler::FuzzDeltaRequest;
 use anki_proto::scheduler::FuzzDeltaResponse;
 use anki_proto::scheduler::GetGmatScoresRequest;
 use anki_proto::scheduler::GetOptimalRetentionParametersResponse;
+use anki_proto::scheduler::GetTopicBreakdownRequest;
+use anki_proto::scheduler::GetTopicBreakdownResponse;
 use anki_proto::scheduler::GetTopicMasteryStatsRequest;
 use anki_proto::scheduler::GetTopicMasteryStatsResponse;
 use anki_proto::scheduler::GmatScores;
@@ -392,6 +394,13 @@ impl crate::services::SchedulerService for Collection {
         input: GetTopicMasteryStatsRequest,
     ) -> Result<GetTopicMasteryStatsResponse> {
         self.get_topic_mastery_stats(input)
+    }
+
+    fn get_topic_breakdown(
+        &mut self,
+        input: GetTopicBreakdownRequest,
+    ) -> Result<GetTopicBreakdownResponse> {
+        self.get_topic_breakdown(input)
     }
 
     fn get_gmat_scores(&mut self, input: GetGmatScoresRequest) -> Result<GmatScores> {

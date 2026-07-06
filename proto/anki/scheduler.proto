@@ -69,6 +69,12 @@ service SchedulerService {
   // a single aggregate SQL query so it stays fast on large collections.
   rpc GetTopicMasteryStats(GetTopicMasteryStatsRequest)
       returns (GetTopicMasteryStatsResponse);
+  // GMAT fork (T4): read-only per-topic x per-difficulty-band breakdown. Bands
+  // a card by its resolved 0-100 difficulty (0-33 easy / 34-66 medium / 67-100
+  // hard) and reports, per band, total/attempted/correct/accuracy from the
+  // revlog. Shares the same single aggregate SQL pass as GetTopicMasteryStats.
+  rpc GetTopicBreakdown(GetTopicBreakdownRequest)
+      returns (GetTopicBreakdownResponse);
   // GMAT fork (T3): read-only three-score summary (memory / performance /
   // readiness), each with a range + per-score give-up rule.
   rpc GetGmatScores(GetGmatScoresRequest) returns (GmatScores);
@@ -529,6 +535,42 @@ message GetTopicMasteryStatsResponse {
   repeated TopicMasteryStat topics = 1;
 }
 
+// GMAT fork (T4): per-topic x per-difficulty-band breakdown.
+
+message GetTopicBreakdownRequest {
+  // Tag-prefix depth to group by (same taxonomy as GetTopicMasteryStats:
+  // `Section::Topic::Subtopic`). 2 groups at `Section::Topic` (the default when
+  // zero), 1 by `Section`, 3 by the full leaf tag.
+  uint32 topic_depth = 1;
+}
+
+// One difficulty band's counts within a topic. `total` counts cards in the
+// band; `attempted` counts those with >=1 revlog entry; `correct` and
+// `accuracy` are read from the revlog (a review is correct when ease > 1,
+// matching the pass count used elsewhere). `accuracy` = correct / attempted-
+// reviews, 0.0-1.0, and is 0.0 when there are no reviews yet.
+message DifficultyBand {
+  uint32 total = 1;
+  uint32 attempted = 2;
+  uint32 correct = 3;
+  double accuracy = 4;
+}
+
+// A single topic's per-band breakdown plus a "have you hit this topic" flag.
+message TopicDifficultyBreakdown {
+  // The grouped topic tag prefix, e.g. "Quant::Arithmetic".
+  string topic = 1;
+  // Distinct cards in the topic with >=1 revlog entry (across all bands).
+  uint32 reviewed_cards = 2;
+  DifficultyBand easy = 3;
+  DifficultyBand medium = 4;
+  DifficultyBand hard = 5;
+}
+
+message GetTopicBreakdownResponse {
+  repeated TopicDifficultyBreakdown topics = 1;
+}
+
 // GMAT fork (T3): the three scores (memory / performance / readiness).
 
 message GetGmatScoresRequest {
@@ -561,7 +603,8 @@ message GmatScores {
 
 message GradeAnswerRequest {
   bool correct = 1;
-  // Student's self-reported confidence: 0 = guessing, 1 = fairly sure, 2 = confident.
+  // Student's self-reported confidence: 0 = guessing, 1 = fairly sure, 2 =
+  // confident.
   uint32 confidence = 2;
 }
 

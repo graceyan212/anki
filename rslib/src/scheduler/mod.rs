@@ -7,12 +7,13 @@ use crate::error::Result;
 use crate::prelude::*;
 
 mod adaptive;
-mod auto_grade;
 pub mod answering;
+mod auto_grade;
 pub mod bury_and_suspend;
 pub(crate) mod congrats;
 pub(crate) mod filtered;
 pub mod fsrs;
+mod gmat_scores;
 pub mod new;
 pub(crate) mod queue;
 mod reviews;
@@ -20,7 +21,6 @@ mod service;
 pub mod states;
 pub mod timespan;
 pub mod timing;
-mod gmat_scores;
 mod topic_mastery;
 mod upgrade;
 

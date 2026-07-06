@@ -34,9 +34,9 @@ pub(crate) struct TopicCardRow {
     pub passed: u32,
     /// Total genuine reviews in the revlog.
     pub total: u32,
-    /// Epoch-ms of the card's most recent genuine review (revlog.id), or None if
-    /// never reviewed. Added for the T3 memory score; the T2 mastery query
-    /// ignores it.
+    /// Epoch-ms of the card's most recent genuine review (revlog.id), or None
+    /// if never reviewed. Added for the T3 memory score; the T2 mastery
+    /// query ignores it.
     pub last_review_ms: Option<i64>,
 }
 

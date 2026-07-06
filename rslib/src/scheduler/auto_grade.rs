@@ -4,11 +4,11 @@
 //! GMAT fork: turn a tapped multiple-choice answer + the student's confidence
 //! into an Anki `Rating`.
 //!
-//! Calibration — not speed — is the trainable GMAT skill (see the Brainlift), so
-//! the rating comes from *correctness × the student's own confidence*, never from
-//! response time. Time is confounded by reading load, computation weight, and (on
-//! an adaptive test) item position, so it is a poor mastery signal; the apps use
-//! it only for pacing feedback. The same confidence tap doubles as the
+//! Calibration — not speed — is the trainable GMAT skill (see the Brainlift),
+//! so the rating comes from *correctness × the student's own confidence*, never
+//! from response time. Time is confounded by reading load, computation weight,
+//! and (on an adaptive test) item position, so it is a poor mastery signal; the
+//! apps use it only for pacing feedback. The same confidence tap doubles as the
 //! "keep working vs. skip/guess" judgment the exam actually rewards. Pure and
 //! offline, so the desktop app and the phone grade identically.
 
@@ -26,7 +26,8 @@ pub(crate) enum Confidence {
 }
 
 impl Confidence {
-    /// Map the wire value (0/1/2) to a level; anything else is treated as a guess.
+    /// Map the wire value (0/1/2) to a level; anything else is treated as a
+    /// guess.
     pub(crate) fn from_u32(v: u32) -> Self {
         match v {
             2 => Confidence::Confident,

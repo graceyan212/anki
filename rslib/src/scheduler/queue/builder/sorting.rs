@@ -33,10 +33,11 @@ impl QueueBuilder {
     }
 
     /// GMAT fork: adaptive review ordering. Primary key is the same descending
-    /// points-at-stake `weights` as `sort_review`; the difficulty-`fit` distance
-    /// (see `scheduler::adaptive`) is only a tie-break *within* an equal-weight
-    /// group, so the weakest-topic ordering is never overridden. Also a purely
-    /// in-memory reorder — no `card.due` is mutated, so undo is unaffected.
+    /// points-at-stake `weights` as `sort_review`; the difficulty-`fit`
+    /// distance (see `scheduler::adaptive`) is only a tie-break *within* an
+    /// equal-weight group, so the weakest-topic ordering is never
+    /// overridden. Also a purely in-memory reorder — no `card.due` is
+    /// mutated, so undo is unaffected.
     pub(super) fn sort_review_adaptive(
         &mut self,
         weights: &HashMap<NoteId, f32>,

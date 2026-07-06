@@ -22,13 +22,12 @@
 //! Each score carries a range and an independent give-up rule: it abstains with
 //! a `missing` list until it has enough of its own data.
 
-use fsrs::current_retrievability;
-use fsrs::MemoryState;
-use fsrs::FSRS5_DEFAULT_DECAY;
-
 use anki_proto::scheduler::GetGmatScoresRequest;
 use anki_proto::scheduler::GmatScores;
 use anki_proto::scheduler::ScoreValue;
+use fsrs::current_retrievability;
+use fsrs::MemoryState;
+use fsrs::FSRS5_DEFAULT_DECAY;
 
 use crate::prelude::*;
 use crate::storage::topic_stats::TopicCardRow;
@@ -335,7 +334,8 @@ fn readiness_score(rows: &[TopicCardRow], perf: &PerfEstimate) -> ScoreValue {
     // Range from θ's 95% interval, widened by the uncovered fraction.
     let widen = (1.0 - coverage) * 60.0;
     let low = round_to_10((to_gmat(sigmoid(perf.theta - 1.96 * perf.se)) - widen).max(GMAT_MIN));
-    let high = round_to_10((to_gmat(sigmoid(perf.theta + 1.96 * perf.se)) + widen).min(GMAT_MAX_CLAMP));
+    let high =
+        round_to_10((to_gmat(sigmoid(perf.theta + 1.96 * perf.se)) + widen).min(GMAT_MAX_CLAMP));
     let confidence = if coverage >= 0.8 {
         "high"
     } else if coverage >= 0.5 {
@@ -362,7 +362,10 @@ fn coverage_fraction(rows: &[TopicCardRow]) -> f64 {
     if OUTLINE_TOPICS.is_empty() {
         return 0.0;
     }
-    let card_tags: Vec<&str> = rows.iter().filter_map(|r| card_topic_tag(&r.tags)).collect();
+    let card_tags: Vec<&str> = rows
+        .iter()
+        .filter_map(|r| card_topic_tag(&r.tags))
+        .collect();
     let covered = OUTLINE_TOPICS
         .iter()
         .filter(|entry| card_tags.iter().any(|t| topic_covers(entry, t)))
@@ -370,8 +373,8 @@ fn coverage_fraction(rows: &[TopicCardRow]) -> f64 {
     covered as f64 / OUTLINE_TOPICS.len() as f64
 }
 
-/// The card's topic tag: the first `::`-bearing tag whose level-1 namespace is a
-/// known GMAT section (Quant / Verbal / DataInsights). An allowlist, so all
+/// The card's topic tag: the first `::`-bearing tag whose level-1 namespace is
+/// a known GMAT section (Quant / Verbal / DataInsights). An allowlist, so all
 /// orthogonal metadata (difficulty::, split::, type::, aidiff::, id::, kind::,
 /// of::, …) is ignored. A previous blocklist missed `id::` and picked it as the
 /// topic, collapsing coverage to ~18% even when every topic had been studied.
@@ -447,7 +450,13 @@ mod tests {
 
     /// Build a synthetic storage row. `last_days_ago` is how long ago the card
     /// was last reviewed, relative to the `now_ms` passed to `memory_score`.
-    fn row(tags: &str, stability: Option<f32>, passed: u32, total: u32, last_ms: Option<i64>) -> TopicCardRow {
+    fn row(
+        tags: &str,
+        stability: Option<f32>,
+        passed: u32,
+        total: u32,
+        last_ms: Option<i64>,
+    ) -> TopicCardRow {
         TopicCardRow {
             note_id: crate::notes::NoteId(0),
             tags: tags.to_string(),
@@ -464,7 +473,13 @@ mod tests {
 
     #[test]
     fn memory_abstains_below_min_reviews() {
-        let rows = vec![row("Quant::Arithmetic::Percents", Some(50.0), 3, 5, Some(NOW))];
+        let rows = vec![row(
+            "Quant::Arithmetic::Percents",
+            Some(50.0),
+            3,
+            5,
+            Some(NOW),
+        )];
         let sv = memory_score(&rows, NOW);
         assert!(sv.abstained);
         assert!(!sv.missing.is_empty());
@@ -499,7 +514,15 @@ mod tests {
     fn memory_rises_with_higher_stability() {
         let last = NOW - MS_PER_DAY as i64; // reviewed 1 day ago
         let strong: Vec<_> = (0..4)
-            .map(|_| row("Quant::Arithmetic::Percents", Some(200.0), 10, 10, Some(last)))
+            .map(|_| {
+                row(
+                    "Quant::Arithmetic::Percents",
+                    Some(200.0),
+                    10,
+                    10,
+                    Some(last),
+                )
+            })
             .collect();
         let weak: Vec<_> = (0..4)
             .map(|_| row("Quant::Arithmetic::Percents", Some(1.5), 10, 10, Some(last)))
@@ -507,7 +530,12 @@ mod tests {
         let s = memory_score(&strong, NOW);
         let w = memory_score(&weak, NOW);
         assert!(!s.abstained && !w.abstained);
-        assert!(s.score > w.score, "strong {} should beat weak {}", s.score, w.score);
+        assert!(
+            s.score > w.score,
+            "strong {} should beat weak {}",
+            s.score,
+            w.score
+        );
         assert!(s.low <= s.score && s.score <= s.high);
     }
 
@@ -515,21 +543,50 @@ mod tests {
     fn performance_ability_rises_on_correct() {
         // 5 cards × 5 answers = 25 (≥ MIN_PERF_ANSWERS), all on hard items.
         let mostly_right: Vec<_> = (0..5)
-            .map(|_| row("Quant::Algebra::Quadratics difficulty::hard", None, 4, 5, None))
+            .map(|_| {
+                row(
+                    "Quant::Algebra::Quadratics difficulty::hard",
+                    None,
+                    4,
+                    5,
+                    None,
+                )
+            })
             .collect();
         let mostly_wrong: Vec<_> = (0..5)
-            .map(|_| row("Quant::Algebra::Quadratics difficulty::hard", None, 1, 5, None))
+            .map(|_| {
+                row(
+                    "Quant::Algebra::Quadratics difficulty::hard",
+                    None,
+                    1,
+                    5,
+                    None,
+                )
+            })
             .collect();
         let r = PerfEstimate::from_rows(&mostly_right).to_score_value();
         let w = PerfEstimate::from_rows(&mostly_wrong).to_score_value();
         assert!(!r.abstained && !w.abstained);
-        assert!(r.score > w.score, "right {} should beat wrong {}", r.score, w.score);
+        assert!(
+            r.score > w.score,
+            "right {} should beat wrong {}",
+            r.score,
+            w.score
+        );
     }
 
     #[test]
     fn performance_range_brackets_estimate() {
         let rows: Vec<_> = (0..5)
-            .map(|_| row("Verbal::CriticalReasoning::Assumption difficulty::medium", None, 3, 5, None))
+            .map(|_| {
+                row(
+                    "Verbal::CriticalReasoning::Assumption difficulty::medium",
+                    None,
+                    3,
+                    5,
+                    None,
+                )
+            })
             .collect();
         let sv = PerfEstimate::from_rows(&rows).to_score_value();
         assert!(!sv.abstained);
@@ -539,7 +596,15 @@ mod tests {
     #[test]
     fn performance_abstains_when_all_correct() {
         let rows: Vec<_> = (0..5)
-            .map(|_| row("Quant::Algebra::Quadratics difficulty::hard", None, 5, 5, None))
+            .map(|_| {
+                row(
+                    "Quant::Algebra::Quadratics difficulty::hard",
+                    None,
+                    5,
+                    5,
+                    None,
+                )
+            })
             .collect();
         let sv = PerfEstimate::from_rows(&rows).to_score_value();
         assert!(sv.abstained);
@@ -557,7 +622,13 @@ mod tests {
 
     #[test]
     fn readiness_abstains_below_coverage_and_reviews() {
-        let rows = vec![row("Quant::Arithmetic::Percents difficulty::medium", None, 3, 5, None)];
+        let rows = vec![row(
+            "Quant::Arithmetic::Percents difficulty::medium",
+            None,
+            3,
+            5,
+            None,
+        )];
         let perf = PerfEstimate::from_rows(&rows);
         let sv = readiness_score(&rows, &perf);
         assert!(sv.abstained);
@@ -571,13 +642,25 @@ mod tests {
         let rows: Vec<_> = OUTLINE_TOPICS
             .iter()
             .take(14)
-            .map(|t| row(&format!("{t} difficulty::medium"), Some(20.0), 9, 15, Some(NOW)))
+            .map(|t| {
+                row(
+                    &format!("{t} difficulty::medium"),
+                    Some(20.0),
+                    9,
+                    15,
+                    Some(NOW),
+                )
+            })
             .collect();
         let perf = PerfEstimate::from_rows(&rows);
         let sv = readiness_score(&rows, &perf);
         assert!(!sv.abstained, "should be scored: {:?}", sv);
         assert_eq!(sv.unit, "gmat");
-        assert!((GMAT_MIN..=GMAT_MAX_CLAMP).contains(&sv.score), "score {}", sv.score);
+        assert!(
+            (GMAT_MIN..=GMAT_MAX_CLAMP).contains(&sv.score),
+            "score {}",
+            sv.score
+        );
         assert_eq!(sv.score % 10.0, 0.0, "GMAT scores step by 10");
         assert!(sv.low <= sv.score && sv.score <= sv.high);
     }
@@ -589,7 +672,15 @@ mod tests {
         // unit entirely.
         let last = NOW - MS_PER_DAY as i64;
         let rows: Vec<_> = (0..5)
-            .map(|_| row("Quant::Algebra::Quadratics difficulty::hard", Some(300.0), 1, 6, Some(last)))
+            .map(|_| {
+                row(
+                    "Quant::Algebra::Quadratics difficulty::hard",
+                    Some(300.0),
+                    1,
+                    6,
+                    Some(last),
+                )
+            })
             .collect();
         let scores = compute_scores(&rows, NOW);
         let mem = scores.memory.unwrap();
@@ -619,7 +710,11 @@ mod tests {
         note.tags = tags.iter().map(|s| s.to_string()).collect();
         col.add_note(&mut note, DeckId(1)).unwrap();
 
-        let mut card = col.storage.get_card_by_ordinal(note.id, 0).unwrap().unwrap();
+        let mut card = col
+            .storage
+            .get_card_by_ordinal(note.id, 0)
+            .unwrap()
+            .unwrap();
         card.interval = interval;
         card.due = 0;
         card.ctype = CardType::Review;
