@@ -171,7 +171,7 @@ def generate_collection(path: Path) -> None:
                 # revlog-backed accuracy/ability numbers are not degenerate.
                 roll = rng.random()
                 ease = 3 if roll < 0.78 else (4 if roll < 0.88 else 1)
-                col.sched.answerCard(card, ease)
+                col.sched.answerCard(card, ease)  # type: ignore[arg-type]
                 total_reviews += 1
             if (idx + 1) % 10_000 == 0:
                 print(f"  reviewed {idx + 1:,} cards ({total_reviews:,} reviews) ...")
@@ -224,14 +224,15 @@ def run_benchmark(col: Collection, iterations: int) -> list[tuple[str, float, fl
         # is the full 50k GMAT build: build_queues -> gather_cards ->
         # points_at_stake_weights -> sort_review.
         col.decks.set_current(other_did)
-        col.sched.get_queued_cards(fetch_limit=1)  # build (untimed) Default queue
+        # build the (untimed) Default queue to drop the cache before we time
+        col.sched.get_queued_cards(fetch_limit=1)  # type: ignore[union-attr]
         _t0 = time.perf_counter()
         col.decks.set_current(did)
-        col.sched.get_queued_cards(fetch_limit=1)
-        build_review_queue._last = (time.perf_counter() - _t0) * 1000.0
+        col.sched.get_queued_cards(fetch_limit=1)  # type: ignore[union-attr]
+        build_review_queue._last = (time.perf_counter() - _t0) * 1000.0  # type: ignore[attr-defined]
 
     # Flag the action as self-timed (see _time_action) before it first runs.
-    build_review_queue._last = 0.0
+    build_review_queue._last = 0.0  # type: ignore[attr-defined]
 
     def gmat_scores() -> None:
         col._backend.get_gmat_scores(deck_name=GMAT_DECK_NAME)
