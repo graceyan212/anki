@@ -211,7 +211,9 @@ def _time_action(name: str, fn, iterations: int) -> tuple[str, float, float, flo
     return name, p50, p95, worst
 
 
-def run_benchmark(col: Collection, iterations: int) -> list[tuple[str, float, float, float]]:
+def run_benchmark(
+    col: Collection, iterations: int
+) -> list[tuple[str, float, float, float]]:
     did = DeckId(col.decks.id_for_name(GMAT_DECK_NAME))
     other_did = DeckId(1)  # the built-in Default deck, used only to invalidate
 
@@ -271,7 +273,9 @@ def run_benchmark(col: Collection, iterations: int) -> list[tuple[str, float, fl
 
 def _print_table(results, iterations: int, abstained: dict) -> None:
     name_w = max(len(r[0]) for r in results) + 2
-    header = f"{'action'.ljust(name_w)}{'p50 (ms)':>12}{'p95 (ms)':>12}{'worst (ms)':>12}"
+    header = (
+        f"{'action'.ljust(name_w)}{'p50 (ms)':>12}{'p95 (ms)':>12}{'worst (ms)':>12}"
+    )
     print()
     print(f"GMAT engine benchmark  ({TARGET_CARDS:,} cards, N={iterations} per action)")
     print("=" * len(header))
@@ -281,7 +285,9 @@ def _print_table(results, iterations: int, abstained: dict) -> None:
         print(f"{name.ljust(name_w)}{p50:>12.2f}{p95:>12.2f}{worst:>12.2f}")
     print("=" * len(header))
     print()
-    print("Score give-up state on the generated deck (non-abstaining = full path timed):")
+    print(
+        "Score give-up state on the generated deck (non-abstaining = full path timed):"
+    )
     for k, v in abstained.items():
         print(f"  {k}: {'ABSTAINED (needs more data)' if v else 'computed a number'}")
 
@@ -289,7 +295,9 @@ def _print_table(results, iterations: int, abstained: dict) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="GMAT engine benchmark (rubric 7h)")
     parser.add_argument(
-        "--regen", action="store_true", help="regenerate the 50k collection from scratch"
+        "--regen",
+        action="store_true",
+        help="regenerate the 50k collection from scratch",
     )
     parser.add_argument(
         "--iterations", type=int, default=ITERATIONS, help="samples per action (>=30)"
