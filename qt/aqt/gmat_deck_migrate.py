@@ -112,16 +112,7 @@ def _migrate() -> None:
     if col is None:
         return
     try:
-        from anki.gmat_demo_seed import seed_demo_history
-
         changed = _organize_into_subdecks(col)
-        # Seed a mid-progress demo state — self-gated to fire only when the GMAT
-        # deck has NO review history yet, so it never piles onto real reviews and
-        # is a no-op once populated (e.g. a fresh import of the shipped apkg, which
-        # bakes this in). Makes the three scores + coverage map render as "midway
-        # through practising", like the phone.
-        if seed_demo_history(col) > 0:
-            changed = True
         if _expand_parent(col):
             changed = True
         if not changed:
