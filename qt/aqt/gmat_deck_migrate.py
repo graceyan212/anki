@@ -28,6 +28,8 @@ lazily, never ``from aqt import mw`` at module load (circular import).
 
 from __future__ import annotations
 
+from typing import Any
+
 import aqt
 from aqt import gui_hooks
 
@@ -36,64 +38,94 @@ _LAYOUT_VERSION = 2  # 2 = 28 per-topic subdecks + exam parent
 _CONFIG_KEY = "gmatDeckLayoutVersion"  # record of the last applied layout
 
 
+def _misplaced_by_dest(col: Any) -> dict[Any, list[Any]]:
+    """Map dest-subdeck-id -> [card ids] for GMAT-tagged cards not already in
+    their correct topic subdeck. Only inspects cards carrying a GMAT section tag
+    (cheap even on a large collection), so an already-tidy deck yields {}."""
+    from anki.gmat_readiness import (
+        COVERAGE_OUTLINE,
+        _all_outline_topics,
+        _prettify_topic,
+        covered_outline_tag_from_tags,
+    )
+
+    dest_name = {
+        tag: f"{_PARENT}::{_prettify_topic(tag)}" for tag in _all_outline_topics()
+    }
+    query = " or ".join(f'"tag:{section}::*"' for section in COVERAGE_OUTLINE)
+    candidates = col.find_cards(query) if query else []
+
+    dest_did: dict[str, Any] = {}
+    by_dest: dict[Any, list[Any]] = {}
+    for cid in candidates:
+        card = col.get_card(cid)
+        outline = covered_outline_tag_from_tags(card.note().tags)
+        name = dest_name.get(outline) if outline else None
+        if name is None:
+            continue
+        did = dest_did.get(name)
+        if did is None:
+            did = col.decks.id(name)  # get-or-create the subdeck
+            dest_did[name] = did
+        if card.did != did:
+            by_dest.setdefault(did, []).append(cid)
+    return by_dest
+
+
+def _organize_into_subdecks(col: Any) -> bool:
+    """Move any misplaced GMAT cards into their topic subdeck and reset them to
+    new (a fresh drill; history rebuilds as the student practises). Returns True
+    if anything moved. Self-healing: a late import/sync that drops cards flat is
+    tidied here; an already-organised deck is a no-op."""
+    by_dest = _misplaced_by_dest(col)
+    if not by_dest:
+        return False
+    # col.set_deck / schedule_cards_as_new require the v3 scheduler.
+    if not col.v3_scheduler():
+        if col.sched_ver() != 2:
+            col.upgrade_to_v2_scheduler()
+        col.set_v3_scheduler(True)
+    moved: list[Any] = []
+    for did, cids in by_dest.items():
+        col.set_deck(cids, did)
+        moved.extend(cids)
+    col.sched.schedule_cards_as_new(moved)
+    return True
+
+
+def _expand_parent(col: Any) -> bool:
+    """Expand the "GMAT Focus" exam parent so all 28 per-topic subdecks are
+    visible in the deck list (not one collapsed row). Returns True if changed."""
+    parent = col.decks.by_name(_PARENT)
+    if parent is None or not (
+        parent.get("collapsed") or parent.get("browserCollapsed")
+    ):
+        return False
+    parent["collapsed"] = False
+    parent["browserCollapsed"] = False
+    col.decks.save(parent)
+    return True
+
+
 def _migrate() -> None:
     col = aqt.mw.col if aqt.mw else None
     if col is None:
         return
     try:
-        from anki.cards import CardId
-        from anki.decks import DeckId
-        from anki.gmat_readiness import (
-            COVERAGE_OUTLINE,
-            _all_outline_topics,
-            _prettify_topic,
-            covered_outline_tag_from_tags,
-        )
+        from anki.gmat_demo_seed import seed_demo_history
 
-        dest_name = {
-            tag: f"{_PARENT}::{_prettify_topic(tag)}" for tag in _all_outline_topics()
-        }
-
-        # Only inspect cards that actually carry a GMAT section tag — cheap even on
-        # a large unrelated collection.
-        query = " or ".join(f'"tag:{section}::*"' for section in COVERAGE_OUTLINE)
-        candidates = col.find_cards(query) if query else []
-
-        # Collect the MISPLACED ones (not already in their correct subdeck), so a
-        # re-import/sync that drops cards flat is healed on the next launch and an
-        # already-tidy collection is a no-op.
-        dest_did: dict[str, DeckId] = {}
-        by_dest: dict[DeckId, list[CardId]] = {}
-        for cid in candidates:
-            card = col.get_card(cid)
-            outline = covered_outline_tag_from_tags(card.note().tags)
-            name = dest_name.get(outline) if outline else None
-            if name is None:
-                continue
-            did = dest_did.get(name)
-            if did is None:
-                did = col.decks.id(name)  # get-or-create the subdeck
-                dest_did[name] = did
-            if card.did != did:
-                by_dest.setdefault(did, []).append(cid)
-
-        if not by_dest:
-            return  # already organised — nothing to do this launch
-
-        # col.set_deck / schedule_cards_as_new require the v3 scheduler.
-        if not col.v3_scheduler():
-            if col.sched_ver() != 2:
-                col.upgrade_to_v2_scheduler()
-            col.set_v3_scheduler(True)
-
-        moved: list[CardId] = []
-        for did, cids in by_dest.items():
-            col.set_deck(cids, did)
-            moved.extend(cids)
-        # Fresh drill: reset the moved cards to new so every topic serves problems
-        # now (history rebuilds as the student practises; matches the phone).
-        col.sched.schedule_cards_as_new(moved)
-
+        changed = _organize_into_subdecks(col)
+        # Seed a mid-progress demo state — self-gated to fire only when the GMAT
+        # deck has NO review history yet, so it never piles onto real reviews and
+        # is a no-op once populated (e.g. a fresh import of the shipped apkg, which
+        # bakes this in). Makes the three scores + coverage map render as "midway
+        # through practising", like the phone.
+        if seed_demo_history(col) > 0:
+            changed = True
+        if _expand_parent(col):
+            changed = True
+        if not changed:
+            return  # already organised, seeded, and expanded — nothing to do
         col.set_config(_CONFIG_KEY, _LAYOUT_VERSION)
         col.save()
         aqt.mw.reset()  # refresh the deck list / study screen with the new layout
