@@ -1,19 +1,25 @@
 # Copyright: Ankitects Pty Ltd and contributors
 # License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 
-"""GMAT fork: migrate an existing collection to the per-topic subdeck layout.
+"""GMAT fork: keep the collection organised into the per-topic subdeck layout.
 
 The deck ships as 28 per-topic subdecks under "GMAT Focus" (studying the parent
-is the full exam). A collection imported before that split has all cards under
-the old layout, and re-importing the apkg does NOT move existing cards into the
-new subdecks (Anki keeps existing cards in their current deck). So on startup we
-reorganise the cards ourselves — the same tag -> subdeck mapping the deck ships
-with (``anki.gmat_readiness``), applied in place via ``col.set_deck`` — so the
-28 topic decks appear and each is practiceable. Moved cards are reset to new so
-every topic serves problems immediately (a fresh drill; matches the phone).
+is the full exam). But cards can arrive in the OLD flat layout several ways:
+a collection created before the split, a manual ``File > Import`` of the apkg,
+or a sync — and Anki's importer keeps existing cards in their current deck
+rather than moving them into the new subdecks. When that happens the topic
+decks look empty and practising a topic hits "session complete".
 
-Idempotent + gated by a collection-config version, so it runs exactly once per
-layout bump, never on an ordinary launch. Defensive: any error is swallowed so a
+So on every profile open we reconcile: find the cards carrying a GMAT topic tag
+that are NOT already in their correct subdeck (the same tag -> subdeck mapping
+the deck ships with, ``anki.gmat_readiness``) and move them there via
+``col.set_deck``, resetting them to new so every topic serves problems now (a
+fresh drill; matches the phone). This is self-healing — a late import or sync
+that drops cards in flat is tidied on the next launch — and a no-op once the
+collection is already organised, so it never disturbs an ordinary launch.
+
+Only cards that carry a GMAT section tag are ever inspected, so this stays cheap
+even on a large unrelated collection. Defensive: any error is swallowed so a
 migration hiccup can never block startup.
 
 NOTE: imported during ``aqt`` init (via ``aqt.main``); reference ``aqt.mw``
@@ -27,7 +33,7 @@ from aqt import gui_hooks
 
 _PARENT = "GMAT Focus"
 _LAYOUT_VERSION = 2  # 2 = 28 per-topic subdecks + exam parent
-_CONFIG_KEY = "gmatDeckLayoutVersion"
+_CONFIG_KEY = "gmatDeckLayoutVersion"  # record of the last applied layout
 
 
 def _migrate() -> None:
@@ -35,19 +41,44 @@ def _migrate() -> None:
     if col is None:
         return
     try:
-        if int(col.get_config(_CONFIG_KEY, 0) or 0) >= _LAYOUT_VERSION:
-            return
-
         from anki.cards import CardId
+        from anki.decks import DeckId
         from anki.gmat_readiness import (
+            COVERAGE_OUTLINE,
             _all_outline_topics,
             _prettify_topic,
             covered_outline_tag_from_tags,
         )
 
-        dest_map = {
+        dest_name = {
             tag: f"{_PARENT}::{_prettify_topic(tag)}" for tag in _all_outline_topics()
         }
+
+        # Only inspect cards that actually carry a GMAT section tag — cheap even on
+        # a large unrelated collection.
+        query = " or ".join(f'"tag:{section}::*"' for section in COVERAGE_OUTLINE)
+        candidates = col.find_cards(query) if query else []
+
+        # Collect the MISPLACED ones (not already in their correct subdeck), so a
+        # re-import/sync that drops cards flat is healed on the next launch and an
+        # already-tidy collection is a no-op.
+        dest_did: dict[str, DeckId] = {}
+        by_dest: dict[DeckId, list[CardId]] = {}
+        for cid in candidates:
+            card = col.get_card(cid)
+            outline = covered_outline_tag_from_tags(card.note().tags)
+            name = dest_name.get(outline) if outline else None
+            if name is None:
+                continue
+            did = dest_did.get(name)
+            if did is None:
+                did = col.decks.id(name)  # get-or-create the subdeck
+                dest_did[name] = did
+            if card.did != did:
+                by_dest.setdefault(did, []).append(cid)
+
+        if not by_dest:
+            return  # already organised — nothing to do this launch
 
         # col.set_deck / schedule_cards_as_new require the v3 scheduler.
         if not col.v3_scheduler():
@@ -55,26 +86,13 @@ def _migrate() -> None:
                 col.upgrade_to_v2_scheduler()
             col.set_v3_scheduler(True)
 
-        by_dest: dict[str, list[CardId]] = {}
-        for row in col.db.execute("select id from cards"):
-            cid = CardId(row[0])
-            card = col.get_card(cid)
-            outline = covered_outline_tag_from_tags(card.note().tags)
-            dest = dest_map.get(outline) if outline else None
-            if dest is not None:
-                by_dest.setdefault(dest, []).append(cid)
-
-        if by_dest:
-            moved: list[CardId] = []
-            for deck_name, cids in by_dest.items():
-                did = col.decks.id(deck_name)  # get-or-create the subdeck
-                if did is not None:
-                    col.set_deck(cids, did)
-                    moved.extend(cids)
-            if moved:
-                # Fresh drill: reset the moved cards to new so every topic serves
-                # problems now (history rebuilds as the student practises).
-                col.sched.schedule_cards_as_new(moved)
+        moved: list[CardId] = []
+        for did, cids in by_dest.items():
+            col.set_deck(cids, did)
+            moved.extend(cids)
+        # Fresh drill: reset the moved cards to new so every topic serves problems
+        # now (history rebuilds as the student practises; matches the phone).
+        col.sched.schedule_cards_as_new(moved)
 
         col.set_config(_CONFIG_KEY, _LAYOUT_VERSION)
         col.save()
