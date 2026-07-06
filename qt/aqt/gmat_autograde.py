@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Callable, Optional
 
 import aqt
 from aqt import gui_hooks
@@ -45,17 +46,21 @@ _BLUE = "#1E52A8"
 _RATING_COLOR = {1: _RED, 2: _YELLOW, 3: _GREEN, 4: _BLUE}
 _RATING_LABEL = {1: "AGAIN", 2: "HARD", 3: "GOOD", 4: "EASY"}
 
-# Stock Reviewer methods we wrap (captured in init()).
-_orig_show_answer_button = None
-_orig_show_ease_buttons = None
-_orig_link_handler = None
+# Stock Reviewer methods we wrap (captured in init()). Typed as optional
+# callables: None until init() captures the originals, then invoked directly.
+_orig_show_answer_button: Optional[Callable[..., None]] = None
+_orig_show_ease_buttons: Optional[Callable[..., None]] = None
+_orig_link_handler: Optional[Callable[..., None]] = None
 
 
 def _enabled() -> bool:
-    return bool(aqt.mw and aqt.mw.col and aqt.mw.col.get_config("gmatAutoGradeEnabled", True))
+    return bool(
+        aqt.mw and aqt.mw.col and aqt.mw.col.get_config("gmatAutoGradeEnabled", True)
+    )
 
 
 # --- choice-tap injection (question view) ---------------------------------
+
 
 def _inject_choice_taps(html: str) -> str:
     """Make each choice row clickable, reporting its letter via pycmd. A
@@ -83,6 +88,7 @@ def _on_card_will_show(text: str, card: object, kind: str) -> str:
 
 
 # --- gate: a clickable, single-answer MC card we can auto-grade -----------
+
 
 def _gradeable(card: object) -> bool:
     try:
@@ -123,9 +129,9 @@ def _confidence_html(letter: str) -> str:
     return _BB_STYLE + (
         '<div class="gbb">'
         f'<span class="lbl">YOU PICKED {letter} · HOW SURE?</span>'
-        f"<button style=\"background:{_RED}\" onclick=\"pycmd('gmatconf:0')\">GUESSING</button>"
-        f"<button style=\"background:{_YELLOW}\" onclick=\"pycmd('gmatconf:1')\">FAIRLY SURE</button>"
-        f"<button style=\"background:{_GREEN}\" onclick=\"pycmd('gmatconf:2')\">CONFIDENT</button>"
+        f'<button style="background:{_RED}" onclick="pycmd(\'gmatconf:0\')">GUESSING</button>'
+        f'<button style="background:{_YELLOW}" onclick="pycmd(\'gmatconf:1\')">FAIRLY SURE</button>'
+        f'<button style="background:{_GREEN}" onclick="pycmd(\'gmatconf:2\')">CONFIDENT</button>'
         "</div>"
     )
 
@@ -146,15 +152,18 @@ def _rating_html(reviewer: object) -> str:
                 f'<button style="background:{_RATING_COLOR[e]}" '
                 f"onclick=\"pycmd('gmatease:{e}')\">{_RATING_LABEL[e]}{mark}</button>"
             )
-        return _BB_STYLE + f'<div class="gbb"><span class="lbl" style="background:{note_bg}">{note}</span>{btns}</div>'
+        return (
+            _BB_STYLE
+            + f'<div class="gbb"><span class="lbl" style="background:{note_bg}">{note}</span>{btns}</div>'
+        )
 
     color = _RATING_COLOR.get(ease, _GREEN)
     label = _RATING_LABEL.get(ease, "GOOD")
     return _BB_STYLE + (
         '<div class="gbb">'
         f'<span class="lbl" style="background:{note_bg}">{note}</span>'
-        f"<button style=\"background:{color}\" onclick=\"pycmd('gmatexpand')\">AI · {label} ▾</button>"
-        f"<button style=\"background:{_INK}\" onclick=\"pycmd('gmatease:{ease}')\">NEXT →</button>"
+        f'<button style="background:{color}" onclick="pycmd(\'gmatexpand\')">AI · {label} ▾</button>'
+        f'<button style="background:{_INK}" onclick="pycmd(\'gmatease:{ease}\')">NEXT →</button>'
         "</div>"
     )
 
@@ -166,7 +175,8 @@ def _apply_bar(reviewer: object, html: str) -> None:
         "(function(){var s=document.querySelectorAll('td.stat');"
         "for(var i=0;i<s.length;i++){s[i].style.display='none';}"
         "var m=document.getElementById('middle');"
-        "if(m){m.style.width='100%%';m.style.padding='0';m.innerHTML=%s;}})();" % json.dumps(html)
+        "if(m){m.style.width='100%%';m.style.padding='0';m.innerHTML=%s;}})();"
+        % json.dumps(html)
     )
 
 
@@ -189,7 +199,9 @@ def _grade(reviewer: object, confidence: int) -> None:
     m = _ANSWER_LETTER_RE.search(card.answer())
     correct = bool(letter and m and m.group(1).upper() == letter)
     try:
-        ease = aqt.mw.col._backend.grade_answer(correct=correct, confidence=confidence).ease
+        ease = aqt.mw.col._backend.grade_answer(
+            correct=correct, confidence=confidence
+        ).ease
     except Exception:
         ease = 3
     if ease not in (1, 2, 3, 4):
@@ -198,10 +210,11 @@ def _grade(reviewer: object, confidence: int) -> None:
     reviewer._gmat_overconfident = (not correct) and confidence != 0  # type: ignore[attr-defined]
     reviewer._gmat_expanded = False  # type: ignore[attr-defined]
     if reviewer.state == "question":  # type: ignore[attr-defined]
-        reviewer._showAnswer()  # -> patched _showEaseButtons -> the rating bar
+        reviewer._showAnswer()  # type: ignore[attr-defined]  # -> patched _showEaseButtons -> rating bar
 
 
 # --- patched Reviewer methods (guarded; fall back to stock on any issue) ---
+
 
 def _show_answer_button(reviewer: object) -> None:
     try:
@@ -256,7 +269,7 @@ def _on_js_message(handled: tuple, message: str, context: object) -> tuple:
             letter = message.split(":", 1)[1].strip().upper()
             r = aqt.mw.reviewer
             if letter and r and _enabled():
-                r._gmat_letter = letter
+                r._gmat_letter = letter  # type: ignore[attr-defined]
                 _apply_bar(r, _confidence_html(letter))
         except Exception:  # pragma: no cover
             pass
@@ -275,6 +288,6 @@ def init() -> None:
         _orig_show_answer_button = Reviewer._showAnswerButton
         _orig_show_ease_buttons = Reviewer._showEaseButtons
         _orig_link_handler = Reviewer._linkHandler
-        Reviewer._showAnswerButton = _show_answer_button
-        Reviewer._showEaseButtons = _show_ease_buttons
-        Reviewer._linkHandler = _link_handler
+        Reviewer._showAnswerButton = _show_answer_button  # type: ignore[method-assign,assignment]
+        Reviewer._showEaseButtons = _show_ease_buttons  # type: ignore[method-assign,assignment]
+        Reviewer._linkHandler = _link_handler  # type: ignore[method-assign,assignment]

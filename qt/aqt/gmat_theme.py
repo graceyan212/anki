@@ -235,7 +235,9 @@ _BAUHAUS_WEBVIEW_CSS = f"""
 """
 
 
-def _on_webview_will_set_content(web_content: WebContent, context: object | None) -> None:
+def _on_webview_will_set_content(
+    web_content: WebContent, context: object | None
+) -> None:
     """Append our <style> (per the WebContent docstring: append, never
     overwrite). ``head`` is emitted last in <head>, after Anki's :root vars, so
     our overrides win. Re-fires automatically on theme change, so it persists
@@ -280,8 +282,7 @@ _CARD_CSS = (
 .gmat-card .explanation-body { font-weight: 400; font-size: 19px; line-height: 1.55; }
 .gmat-card .explanation-body b, .gmat-card .explanation-body strong { font-weight: 700; }
 </style>
-"""
-    .replace("__FONT__", BAUHAUS_FONT_STACK)
+""".replace("__FONT__", BAUHAUS_FONT_STACK)
     .replace("__INK__", BAUHAUS_INK)
     .replace("__PAPER__", BAUHAUS_PAPER)
     .replace("__GREEN__", BAUHAUS_GREEN)
@@ -351,7 +352,9 @@ def _transform_card(text: str) -> str | None:
         # Keep id="answer" so Anki's scroll-to-answer still works.
         out.append('<hr id="answer" class="rule">')
         out.append('<div class="explanation-tab">Explanation</div>')
-        out.append(f'<div class="explanation-body">{explanation if explanation else back}</div>')
+        out.append(
+            f'<div class="explanation-body">{explanation if explanation else back}</div>'
+        )
     out.append("</div>")
     return "".join(out)
 

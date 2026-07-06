@@ -717,8 +717,14 @@ create table if not exists profiles
         self.profile["middleClickPasteEnabled"] = val
 
     def custom_sync_url(self) -> str | None:
-        """A custom server provided by the user."""
-        return self.profile.get("customSyncUrl")
+        """A custom server provided by the user.
+
+        Defaults to the shared self-hosted GMAT sync server when unset, so the
+        desktop syncs to the same server as the phone without the user pasting a
+        URL. (The password is still entered once in Anki's login dialog — that's
+        inherent to the sync handshake.)
+        """
+        return self.profile.get("customSyncUrl") or "https://gmat-sync.fly.dev/"
 
     def set_custom_sync_url(self, url: str | None) -> None:
         if url != self.custom_sync_url():

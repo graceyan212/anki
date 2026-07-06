@@ -34,7 +34,13 @@ import html
 from typing import TYPE_CHECKING
 
 import aqt
-from anki.gmat_readiness import ReadinessResult, compute_readiness
+from anki.gmat_readiness import (
+    _SECTION_DISPLAY,
+    COVERAGE_OUTLINE,
+    ReadinessResult,
+    _prettify_topic,
+    compute_readiness,
+)
 from aqt.qt import (
     QAction,
     QDialog,
@@ -159,6 +165,19 @@ class GmatReadinessDialog(QDialog):
         # Body: coverage, evidence, give-up rule, missing list.
         self._body = QTextBrowser(self)
         self._body.setOpenExternalLinks(False)
+        # QTextBrowser has no JS; the phone's "tap to expand" is reproduced by
+        # anchor links (href="#topic:<key>") that we intercept here to toggle a
+        # topic's expanded state and re-render in place, rather than navigating.
+        self._body.setOpenLinks(False)
+        qconnect(self._body.anchorClicked, self._on_anchor_clicked)
+        # Per-topic breakdown from the GetTopicBreakdown RPC, keyed by the pretty
+        # label (e.g. "Arithmetic · Percents"); populated in refresh().
+        self._breakdown_by_label: dict[str, object] = {}
+        # Which topic rows are currently expanded (pretty labels).
+        self._expanded: set[str] = set()
+        # Last-rendered inputs, so an anchor-click re-render doesn't recompute.
+        self._last_result: ReadinessResult | None = None
+        self._last_deck_name: str | None = None
         layout.addWidget(self._body)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
@@ -193,8 +212,50 @@ class GmatReadinessDialog(QDialog):
         except Exception:
             self._scores = None
 
+        # Per-topic × difficulty-band breakdown from the shared engine RPC
+        # (GetTopicBreakdown, service 13 / method 40). This drives the
+        # green-if-practiced coverage squares and the expandable easy/med/hard
+        # rows — the same data the phone renders. topic_depth=3 yields the full
+        # Section::Topic::Subtopic keys (DataInsights collapses to 2 segments on
+        # its own); we key them by the pretty label to match the outline.
+        self._breakdown_by_label = {}
+        try:
+            for item in col._backend.get_topic_breakdown(topic_depth=3):
+                self._breakdown_by_label[_prettify_topic(item.topic)] = item
+        except Exception:
+            self._breakdown_by_label = {}
+
         result = compute_readiness(col, deck_name=deck_name)
         self._render(result, deck_name)
+
+    def _on_anchor_clicked(self, url: object) -> None:
+        """Toggle a topic row's expanded state when its anchor is clicked.
+
+        The body links use ``href="#topic:<pretty label>"``; we intercept them
+        (QTextBrowser JS is unavailable) and re-render with the row open/closed.
+        Qt hands us a QUrl whose fragment may be percent-encoded (the labels
+        contain spaces and a "·"), so we decode before matching.
+        """
+        from urllib.parse import unquote
+
+        fragment = url.toString() if hasattr(url, "toString") else str(url)
+        fragment = unquote(fragment)
+        prefix = "#topic:"
+        if not fragment.startswith(prefix):
+            return
+        label = fragment[len(prefix) :]
+        if label in self._expanded:
+            self._expanded.discard(label)
+        else:
+            self._expanded.add(label)
+        # Only practiced topics expand; ignore a stray click on a hollow row.
+        if not self._is_practiced(label):
+            self._expanded.discard(label)
+        if self._last_result is None:
+            return
+        pos = self._body.verticalScrollBar().value()
+        self._body.setHtml(self._body_html(self._last_result, self._last_deck_name))
+        self._body.verticalScrollBar().setValue(pos)
 
     def _render(self, result: ReadinessResult, deck_name: str | None) -> None:
         # The three shared-engine scores (memory / performance / readiness) are
@@ -205,6 +266,10 @@ class GmatReadinessDialog(QDialog):
         # retired. Keeping the widgets but hidden avoids reworking the layout.
         self._headline.setVisible(False)
         self._subhead.setVisible(False)
+        # Remember the inputs so an anchor click (expand/collapse) can re-render
+        # without recomputing readiness.
+        self._last_result = result
+        self._last_deck_name = deck_name
         self._body.setHtml(self._body_html(result, deck_name))
 
     def _body_html(self, result: ReadinessResult, deck_name: str | None) -> str:
@@ -242,8 +307,11 @@ class GmatReadinessDialog(QDialog):
         if result.abstained and result.missing:
             parts.append(self._whats_left_html(result))
 
-        # Coverage map: every exam topic, marked covered/not, always shown.
+        # Coverage map: every exam topic; green only when actually practiced.
         parts.append(self._coverage_html(result))
+
+        # Per-topic breakdown: each topic expandable into easy/med/hard rows.
+        parts.append(self._breakdown_html(result))
 
         # Give-up rule: a left-accented note, italic + muted.
         parts.append(self._rule_note_html(result))
@@ -388,10 +456,15 @@ class GmatReadinessDialog(QDialog):
         return (
             f"<p style='margin:14px 0 6px 0; font-size:11px; font-weight:bold;"
             f" color:{BAUHAUS_INK};'>WHAT'S LEFT</p>"
-            f"<table cellspacing='0' cellpadding='0'>"
-            + "".join(rows)
-            + "</table>"
+            f"<table cellspacing='0' cellpadding='0'>" + "".join(rows) + "</table>"
         )
+
+    def _is_practiced(self, pretty_label: str) -> bool:
+        """A topic square is filled green ONLY when the student has actually
+        reviewed a card in it (reviewed_cards > 0 from GetTopicBreakdown), NOT
+        merely because the deck covers it — matching the phone."""
+        item = self._breakdown_by_label.get(pretty_label)
+        return bool(item is not None and getattr(item, "reviewed_cards", 0) > 0)
 
     def _coverage_html(self, result: ReadinessResult) -> str:
         parts: list[str] = []
@@ -403,11 +476,25 @@ class GmatReadinessDialog(QDialog):
             f"<td height='2' bgcolor='{BAUHAUS_INK}'"
             f" style='background-color:{BAUHAUS_INK};'></td></tr></table>"
         )
+        # The count is now reviewed-topics / 28, not deck-covered / 28 — green
+        # means practiced, so the headline number must match the squares. Count
+        # only the 28 outline topics (an off-outline practiced tag must not
+        # inflate the total past what the grid can show).
+        practiced = sum(
+            1
+            for _section, rows in result.coverage_map()
+            for name, _in_deck in rows
+            if self._is_practiced(name)
+        )
         parts.append(
             f"<p style='margin:10px 0 2px 0; font-size:11px;"
             f" font-weight:bold; color:{BAUHAUS_INK};'>"
-            f"EXAM COVERAGE &#8212; {len(result.covered_topics)} / "
+            f"TOPICS PRACTICED &#8212; {practiced} / "
             f"{result.total_topics} TOPICS</p>"
+        )
+        parts.append(
+            f"<p style='margin:0 0 4px 0; font-size:10px; color:{BAUHAUS_MUTED};'>"
+            f"Green = practiced. Hollow = in your deck, not yet reviewed.</p>"
         )
         for section_name, rows in result.coverage_map():
             parts.append(
@@ -416,7 +503,7 @@ class GmatReadinessDialog(QDialog):
                 f"{html.escape(section_name).upper()}</p>"
             )
             # Two-column topic grid via a table (grid/flex unsupported here).
-            cells = [self._topic_cell(name, cov) for name, cov in rows]
+            cells = [self._topic_cell(name, in_deck) for name, in_deck in rows]
             parts.append(
                 "<table cellspacing='0' cellpadding='0' width='100%'"
                 " style='border-collapse:collapse;'>"
@@ -428,10 +515,10 @@ class GmatReadinessDialog(QDialog):
             parts.append("</table>")
         return "".join(parts)
 
-    def _topic_cell(self, topic_name: str, is_covered: bool) -> str:
+    def _topic_cell(self, topic_name: str, in_deck: bool) -> str:
         label = html.escape(topic_name)
-        if is_covered:
-            # Green filled square marker; ink label.
+        if self._is_practiced(topic_name):
+            # PRACTICED: green filled square marker; ink label.
             marker = (
                 f"<td width='13' height='13' bgcolor='{BAUHAUS_GREEN}'"
                 f" style='background-color:{BAUHAUS_GREEN};"
@@ -439,13 +526,16 @@ class GmatReadinessDialog(QDialog):
             )
             label_color = BAUHAUS_INK
         else:
-            # Hollow square with a muted border; muted label.
+            # COVERED-BUT-NOT-PRACTICED (or absent): hollow square. A covered
+            # topic gets a firmer ink border; a topic not even in the deck stays
+            # muted — but neither is green until it's been reviewed.
+            border = BAUHAUS_INK if in_deck else BAUHAUS_HOLLOW
             marker = (
                 f"<td width='13' height='13' bgcolor='{BAUHAUS_PAPER}'"
                 f" style='background-color:{BAUHAUS_PAPER};"
-                f" border:2px solid {BAUHAUS_HOLLOW};'></td>"
+                f" border:2px solid {border};'></td>"
             )
-            label_color = BAUHAUS_MUTED
+            label_color = BAUHAUS_INK if in_deck else BAUHAUS_MUTED
         return (
             f"<td width='50%' valign='middle' style='padding:3px 0;'>"
             f"<table cellspacing='0' cellpadding='0'><tr>"
@@ -455,6 +545,136 @@ class GmatReadinessDialog(QDialog):
             f"{label}</td>"
             f"</tr></table></td>"
         )
+
+    def _breakdown_html(self, result: ReadinessResult) -> str:
+        """The 'TOPIC BREAKDOWN' section: every one of the 28 outline topics as a
+        row (grouped by section), each with its green-if-practiced square + label.
+        A practiced topic is a link that toggles an expansion showing EASY /
+        MEDIUM / HARD accuracy + attempted/total — the same data and layout the
+        phone renders. QTextBrowser has no JS, so the toggle is an anchor click
+        intercepted by _on_anchor_clicked."""
+        parts: list[str] = []
+        # Ink divider + section header.
+        parts.append(
+            f"<table cellspacing='0' cellpadding='0' width='100%'"
+            f" style='margin:18px 0 0 0;'><tr>"
+            f"<td height='2' bgcolor='{BAUHAUS_INK}'"
+            f" style='background-color:{BAUHAUS_INK};'></td></tr></table>"
+        )
+        parts.append(
+            f"<p style='margin:10px 0 2px 0; font-size:11px;"
+            f" font-weight:bold; letter-spacing:1px; color:{BAUHAUS_INK};'>"
+            f"TOPIC BREAKDOWN</p>"
+        )
+        parts.append(
+            f"<p style='margin:0 0 6px 0; font-size:10px; color:{BAUHAUS_MUTED};'>"
+            f"Green = practiced. Click a practiced topic for easy / medium / hard"
+            f" accuracy.</p>"
+        )
+        for section, topics in COVERAGE_OUTLINE.items():
+            name = _SECTION_DISPLAY.get(section, section)
+            parts.append(
+                f"<p style='margin:12px 0 2px 0; font-size:11px;"
+                f" font-weight:bold; color:{BAUHAUS_INK};'>"
+                f"{html.escape(name).upper()}</p>"
+            )
+            parts.append(
+                "<table cellspacing='0' cellpadding='0' width='100%'"
+                " style='border-collapse:collapse;'>"
+            )
+            for tag in topics:
+                parts.append(self._breakdown_row(_prettify_topic(tag)))
+            parts.append("</table>")
+        return "".join(parts)
+
+    def _breakdown_row(self, pretty_label: str) -> str:
+        label = html.escape(pretty_label)
+        practiced = self._is_practiced(pretty_label)
+        expanded = pretty_label in self._expanded
+
+        if practiced:
+            marker = (
+                f"<td width='13' height='13' bgcolor='{BAUHAUS_GREEN}'"
+                f" style='background-color:{BAUHAUS_GREEN};"
+                f" border:2px solid {BAUHAUS_GREEN};'></td>"
+            )
+            # Chevron mirrors the phone: ▾ open, ▸ closed.
+            chevron = "&#9662;" if expanded else "&#9656;"
+            # The whole row is a link that toggles this topic's expansion.
+            href = f"#topic:{pretty_label}"
+            row = (
+                f"<tr><td style='padding:4px 0;'>"
+                f"<a href='{html.escape(href, quote=True)}'"
+                f" style='text-decoration:none; color:{BAUHAUS_INK};'>"
+                f"<table cellspacing='0' cellpadding='0' width='100%'><tr>"
+                f"{marker}"
+                f"<td valign='middle' style='padding-left:8px; font-size:12px;"
+                f" color:{BAUHAUS_INK};'>{label}</td>"
+                f"<td valign='middle' align='right' style='font-size:12px;"
+                f" font-weight:bold; color:{BAUHAUS_INK};'>{chevron}</td>"
+                f"</tr></table></a></td></tr>"
+            )
+        else:
+            # Not practiced: hollow square, muted em-dash where the chevron is,
+            # no link (nothing to expand yet).
+            row = (
+                f"<tr><td style='padding:4px 0;'>"
+                f"<table cellspacing='0' cellpadding='0' width='100%'><tr>"
+                f"<td width='13' height='13' bgcolor='{BAUHAUS_PAPER}'"
+                f" style='background-color:{BAUHAUS_PAPER};"
+                f" border:2px solid {BAUHAUS_HOLLOW};'></td>"
+                f"<td valign='middle' style='padding-left:8px; font-size:12px;"
+                f" color:{BAUHAUS_MUTED};'>{label}</td>"
+                f"<td valign='middle' align='right' style='font-size:12px;"
+                f" color:{BAUHAUS_MUTED};'>&#8212;</td>"
+                f"</tr></table></td></tr>"
+            )
+
+        if practiced and expanded:
+            row += self._bands_rows(pretty_label)
+        return row
+
+    def _bands_rows(self, pretty_label: str) -> str:
+        """The three EASY / MEDIUM / HARD accuracy rows shown when a topic is
+        expanded. Each shows 'NN% · A/T seen', or 'not attempted · N cards'
+        ('no cards' when the band is empty) — matching the phone exactly."""
+        item = self._breakdown_by_label.get(pretty_label)
+        if item is None:
+            return ""
+        bands = [
+            ("EASY", BAUHAUS_GREEN, getattr(item, "easy", None)),
+            ("MEDIUM", BAUHAUS_YELLOW, getattr(item, "medium", None)),
+            ("HARD", BAUHAUS_RED, getattr(item, "hard", None)),
+        ]
+        rows: list[str] = []
+        for band_label, color, band in bands:
+            total = int(getattr(band, "total", 0)) if band is not None else 0
+            attempted = int(getattr(band, "attempted", 0)) if band is not None else 0
+            accuracy = float(getattr(band, "accuracy", 0.0)) if band is not None else 0.0
+            if attempted == 0:
+                detail = (
+                    f"not attempted &#183; {total} cards"
+                    if total > 0
+                    else "no cards"
+                )
+                detail_color = BAUHAUS_MUTED
+            else:
+                pct = int(round(accuracy * 100))
+                detail = f"{pct}% &#183; {attempted}/{total} seen"
+                detail_color = BAUHAUS_INK
+            rows.append(
+                f"<tr><td style='padding:2px 0 2px 24px;'>"
+                f"<table cellspacing='0' cellpadding='0'><tr>"
+                f"<td width='10' height='10' bgcolor='{color}'"
+                f" style='background-color:{color};'></td>"
+                f"<td valign='middle' style='padding-left:8px; font-size:10px;"
+                f" font-weight:bold; letter-spacing:1px; color:{BAUHAUS_INK};'>"
+                f"{band_label}</td>"
+                f"<td valign='middle' style='padding-left:12px; font-size:11px;"
+                f" color:{detail_color};'>{detail}</td>"
+                f"</tr></table></td></tr>"
+            )
+        return "".join(rows)
 
     def _rule_note_html(self, result: ReadinessResult) -> str:
         # Left-ruled note: a narrow yellow accent cell + italic muted text.
