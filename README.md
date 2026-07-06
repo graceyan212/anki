@@ -74,6 +74,19 @@ just test-py     # Python tests
 just test-ts     # TypeScript/Svelte tests
 ```
 
+### Performance benchmark
+
+```
+just bench       # load a ~50k-card GMAT deck; print p50/p95/worst per action
+```
+
+One command generates (and caches) a ~50,000-card GMAT collection and reports
+the median / 95th-percentile / worst-case latency in milliseconds for each key
+engine action (review-queue build, the three-score RPC, topic mastery, topic
+breakdown, next-card fetch+answer), checked against the Section 10 targets. See
+[docs/BENCHMARK.md](./docs/BENCHMARK.md) for the deck details and the recorded
+pass/fail results.
+
 ### Building an installer
 
 The Briefcase-based installer code lives in `qt/installer`, with per-platform

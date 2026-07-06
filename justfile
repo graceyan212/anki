@@ -18,6 +18,13 @@ run *args:
 run-optimized *args:
     {{ if os() == "windows" { "$env:RELEASE='1'; .\\run.bat" } else { "RELEASE=1 ./run" } }} {{ args }}
 
+# GMAT fork: benchmark the key engine actions on a ~50k-card deck (rubric 7h).
+# Generates (and caches) the deck, then prints p50/p95/worst per action in ms.
+# Pass --regen to rebuild the deck from scratch.
+bench *args:
+    {{ ninja }} pyenv pylib
+    {{ pyenv_python }} tools/bench.py {{ args }}
+
 # Watch web sources and rebuild/reload Anki's web stack on change (macOS/Linux)
 web-watch:
     ./tools/web-watch
@@ -184,5 +191,6 @@ ninja := if os() == "windows" { "tools\\ninja" } else { "./ninja" }
 run_script := if os() == "windows" { ".\\run.bat" } else { "./run" }
 playwright_env := if os() == "windows" { "set PLAYWRIGHT_BROWSERS_PATH=out\\playwright-browsers&&" } else { "PLAYWRIGHT_BROWSERS_PATH=out/playwright-browsers" }
 yarn := if os() == "windows" { "out\\extracted\\node\\yarn.cmd" } else { "out/extracted/node/bin/yarn" }
+pyenv_python := if os() == "windows" { "out\\pyenv\\Scripts\\python" } else { "out/pyenv/bin/python" }
 uv := env("UV_BINARY", if os() == "windows" { "out\\extracted\\uv\\uv" } else { "out/extracted/uv/uv" })
 export UV_PROJECT_ENVIRONMENT := if os() == "windows" { "out\\pyenv" } else { "out/pyenv" }
