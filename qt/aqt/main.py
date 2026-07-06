@@ -22,6 +22,7 @@ import aqt
 import aqt.forms
 import aqt.gmat_autograde
 import aqt.gmat_dashboard
+import aqt.gmat_deck_migrate
 import aqt.gmat_theme
 import aqt.progress
 import aqt.sound
@@ -254,6 +255,7 @@ class AnkiQt(QMainWindow):
         aqt.gmat_dashboard.init()  # GMAT readiness panel (track T3)
         aqt.gmat_theme.init()  # app-wide Bauhaus theme layer (track T3)
         aqt.gmat_autograde.init()  # auto-grade tapped MC answers (off by default)
+        aqt.gmat_deck_migrate.init()  # migrate legacy collections to per-topic subdecks
 
     def setupProfileAfterWebviewsLoaded(self) -> None:
         for w in (self.web, self.bottomWeb):
